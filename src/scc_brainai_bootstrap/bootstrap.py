@@ -33,6 +33,7 @@ from scc_brainai_bootstrap.core.config import BrainAIConfig, load_config
 from scc_brainai_bootstrap.cognition import CognitiveStack
 from scc_brainai_bootstrap.doctor import Doctor
 from scc_brainai_bootstrap.event_bus import EventBus
+from scc_brainai_bootstrap.learning import LearningLayer
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
 from scc_brainai_bootstrap import router
 from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
@@ -56,6 +57,7 @@ class BrainAIBootstrap:
         self.kernel = KernelComponent(self.config)
         self.agents = AgentRegistry(self.config)
         self.cognition = CognitiveStack(self.config)
+        self.learning = LearningLayer(self.config)
         self._booted = False
 
     @property
@@ -266,6 +268,76 @@ class BrainAIBootstrap:
                       for s in done["steps"]],
             "memory_ingested": ingested,
         }
+
+    # ================================================================== #
+    # Chaîne apprenante : Memory (vécu) -> Learning (apprentissages proposés)
+    # ================================================================== #
+    def _learning_engine(self):
+        """Démarre si besoin, initialise Memory, et retourne le moteur Learning
+        branché sur la **mémoire vivante** du bootstrap (ou None si indisponible)."""
+        if not self._booted:
+            self.run()
+        self.memory.init()
+        return self.learning.engine(self.memory.store)
+
+    def learn(self) -> Dict[str, Any]:
+        """Analyse le vécu conservé en Memory (11) et en dérive des **apprentissages
+        propositionnels** via Learning (12). Aucun apprentissage n'est appliqué : tout
+        est une proposition soumise à validation humaine. Aucune couche n'est modifiée.
+        """
+        engine = self._learning_engine()
+        if engine is None:
+            return {"ok": False, "error": f"Learning indisponible : {self.learning.error}"}
+        result = engine.analyze()
+        self.bus.publish("learning.analyzed",
+                         {"entries": result["analyzed_entries"],
+                          "total": result["total_learnings"]})
+        self._persist_events()
+        recommendations = [
+            {"id": it["id"], "title": it["title"],
+             "confidence": it["confidence"], "status": it["status"]}
+            for it in engine.search(kind="recommendation", limit=10)
+        ]
+        return {
+            "ok": True,
+            "analyzed_entries": result["analyzed_entries"],
+            "produced": result["produced"],
+            "total_learnings": result["total_learnings"],
+            "recommendations": recommendations,
+            "needs_human_validation": True,
+        }
+
+    def learnings(self, kind: Optional[str] = None,
+                  status: Optional[str] = None) -> Dict[str, Any]:
+        """Liste les apprentissages proposés (lecture seule)."""
+        engine = self._learning_engine()
+        if engine is None:
+            return {"ok": False, "error": f"Learning indisponible : {self.learning.error}"}
+        items = engine.search(kind=kind, status=status, limit=1000)
+        return {"ok": True, "count": len(items),
+                "counts": engine.index.counts(),
+                "items": [{"id": it["id"], "kind": it["kind"], "title": it["title"],
+                           "confidence": it["confidence"], "status": it["status"]}
+                          for it in items]}
+
+    def validate_learning(self, item_id: str, approver: str,
+                          reason: str = "", action: str = "validate") -> Dict[str, Any]:
+        """Validation humaine d'un apprentissage (garde-fou : jamais appliqué sans
+        approbateur identifié). ``action`` ∈ {validate, reject, revoke}."""
+        engine = self._learning_engine()
+        if engine is None:
+            return {"ok": False, "error": f"Learning indisponible : {self.learning.error}"}
+        if action not in ("validate", "reject", "revoke"):
+            return {"ok": False, "error": f"action inconnue : {action}"}
+        try:
+            it = getattr(engine, action)(item_id, approver, reason)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+        topic = {"validate": "learning.validated", "reject": "learning.rejected",
+                 "revoke": "learning.revoked"}[action]
+        self.bus.publish(topic, {"item_id": item_id, "by": approver})
+        self._persist_events()
+        return {"ok": True, "item_id": item_id, "status": it["status"]}
 
     # ================================================================== #
     # Point d'entrée unique : routage automatique

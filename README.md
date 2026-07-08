@@ -108,6 +108,38 @@ Après `execute`, les **traces d'exécution** produites par Execution (16) sont
 **ingérées dans Memory (11)** — le vécu d'exécution devient mémoire, exploitable plus
 tard par Learning. La boucle vécu → mémoire se referme aussi sur l'exécution.
 
+## La chaîne apprenante (Memory → Learning)
+
+BrainAI **apprend de son propre vécu** : Learning (12) lit la **mémoire vivante** du
+bootstrap (le `BrainMemoryStore` déjà initialisé) et en dérive des **apprentissages**
+— signaux, patterns, leçons, recommandations, hypothèses.
+
+```bash
+scc-brainai learn
+```
+
+```
+vécu analysé  : 40 entrée(s) de Memory
+apprentissages: 22 au total (signaux 13, patterns 3, leçons 3, recommandations 2, hypothèses 1)
+recommandations (propositions à valider) :
+  ○ [recommendation_b735e1245855] Recommandation : agent mobilization  (confiance 1.0, proposed)
+
+→ valider : scc-brainai learn-validate <id> --by <acteur>
+```
+
+```bash
+scc-brainai learnings --kind recommendation      # lister les propositions
+scc-brainai learn-validate <id> --by frederique  # validation humaine
+scc-brainai learn-validate <id> --by frederique --action reject
+```
+
+Garde-fous hérités de Learning : **aucun apprentissage appliqué**, **aucune
+auto-modification** (doctrine, workflow, agent, mémoire, graphe, code). Tout est une
+**proposition traçable, révocable, soumise à validation humaine**. L'état des
+apprentissages est persistant sous `data/learning/` (une décision humaine survit aux
+redémarrages). La boucle **vécu → mémoire → apprentissage** se referme ici, sans qu'aucun
+composant ne soit modifié : Learning n'écrit que dans son propre registre de propositions.
+
 ## Séquence de démarrage (les 8 étapes)
 
 1. **Configuration** — charge `config/brainai.json` (scc_root, `as_of`, premiers agents).
@@ -134,16 +166,16 @@ scc-brainai doctor
 BrainAI DOCTOR
 ──────────────
 patrimoine    : 21/21 présents
-disponibilité : control_plane ✓  memory ✓  knowledge ✓  kernel ✓  reasoning ✓  planning ✓  decision ✓  execution ✓
+disponibilité : control_plane ✓  memory ✓  knowledge ✓  kernel ✓  reasoning ✓  planning ✓  decision ✓  execution ✓  learning ✓
 santé         : control plane = ok (15 domaines)
-audits        : memory ✓  reasoning ✓  planning ✓  decision ✓  execution ✓
+audits        : memory ✓  reasoning ✓  planning ✓  decision ✓  execution ✓  learning ✓
 
 VERDICT : BrainAI HEALTHY
 ```
 
 Il agrège, en lecture seule : le **patrimoine**, la **disponibilité** des composants,
 la **santé** du Control Plane et les **audits** des couches (Memory + Reasoning /
-Planning / Decision / Execution). Verdict `healthy` / `degraded` (code de sortie 0/1).
+Planning / Decision / Execution / Learning). Verdict `healthy` / `degraded` (code de sortie 0/1).
 
 ## Event Bus vivant (observabilité)
 
@@ -182,7 +214,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 77 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 92 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

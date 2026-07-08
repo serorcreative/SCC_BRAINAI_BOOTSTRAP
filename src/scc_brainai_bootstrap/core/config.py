@@ -76,8 +76,16 @@ class BrainAIConfig:
         return self.scc_root / "16_BRAINAI_EXECUTION" / "src"
 
     @property
+    def learning_src(self) -> Path:
+        return self.scc_root / "12_BRAINAI_LEARNING" / "src"
+
+    @property
     def cognition_data(self) -> Path:
         return self.data_dir / "cognition"
+
+    @property
+    def learning_data_dir(self) -> Path:
+        return self.data_dir / "learning"
 
     @property
     def agents_dir(self) -> Path:

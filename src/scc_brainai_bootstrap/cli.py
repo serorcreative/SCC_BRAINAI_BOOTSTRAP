@@ -113,6 +113,45 @@ def cmd_execute(args) -> int:
     return 0
 
 
+def cmd_learn(args) -> int:
+    result = _boot(args).learn()
+    if args.json or not result.get("ok"):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
+    p = result["produced"]
+    print(f"vécu analysé  : {result['analyzed_entries']} entrée(s) de Memory")
+    print(f"apprentissages: {result['total_learnings']} au total "
+          f"(signaux {p['signals']}, patterns {p['patterns']}, leçons {p['lessons']}, "
+          f"recommandations {p['recommendations']}, hypothèses {p['hypotheses']})")
+    if result["recommendations"]:
+        print("recommandations (propositions à valider) :")
+        for r in result["recommendations"]:
+            print(f"  ○ [{r['id']}] {r['title']}  (confiance {r['confidence']}, {r['status']})")
+        print(f"\n→ valider : scc-brainai learn-validate <id> --by <acteur>")
+    else:
+        print("(aucune recommandation : vécu insuffisant — traiter plus de demandes d'abord)")
+    return 0
+
+
+def cmd_learnings(args) -> int:
+    result = _boot(args).learnings(kind=args.kind, status=args.status)
+    if args.json or not result.get("ok"):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
+    print(f"apprentissages: {result['count']}  "
+          + "  ".join(f"{k}={v}" for k, v in result["counts"].items()))
+    for it in result["items"]:
+        print(f"  [{it['status']:<9}] {it['kind']:<14} {it['title']}  "
+              f"(conf {it['confidence']})  {it['id']}")
+    return 0
+
+
+def cmd_learn_validate(args) -> int:
+    result = _boot(args).validate_learning(args.id, args.by, args.reason, action=args.action)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get("ok") else 1
+
+
 def cmd_doctor(args) -> int:
     report = _boot(args).doctor()
     if args.json:
@@ -198,6 +237,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_exec.add_argument("id"); p_exec.add_argument("--by", required=True)
     p_exec.add_argument("--json", action="store_true")
     p_exec.set_defaults(func=cmd_execute)
+
+    p_learn = sub.add_parser("learn", help="Apprendre du vécu (Memory → Learning, propositions).")
+    p_learn.add_argument("--json", action="store_true")
+    p_learn.set_defaults(func=cmd_learn)
+
+    p_learnings = sub.add_parser("learnings", help="Lister les apprentissages proposés.")
+    p_learnings.add_argument("--kind", default=None,
+                             choices=["signal", "pattern", "lesson", "recommendation", "hypothesis"])
+    p_learnings.add_argument("--status", default=None,
+                             choices=["proposed", "validated", "rejected", "revoked"])
+    p_learnings.add_argument("--json", action="store_true")
+    p_learnings.set_defaults(func=cmd_learnings)
+
+    p_lval = sub.add_parser("learn-validate", help="Valider/rejeter/révoquer un apprentissage (humain).")
+    p_lval.add_argument("id")
+    p_lval.add_argument("--by", required=True)
+    p_lval.add_argument("--reason", default="")
+    p_lval.add_argument("--action", default="validate", choices=["validate", "reject", "revoke"])
+    p_lval.set_defaults(func=cmd_learn_validate)
 
     p_doctor = sub.add_parser("doctor", help="Diagnostic complet de BrainAI.")
     p_doctor.add_argument("--json", action="store_true")

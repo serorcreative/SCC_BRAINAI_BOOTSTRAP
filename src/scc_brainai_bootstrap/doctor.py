@@ -2,7 +2,7 @@
 
 Agrège, en lecture seule et via interfaces publiques : le **patrimoine**, la
 **disponibilité** des composants, la **santé** du Control Plane et les **audits**
-des couches (Memory, Reasoning, Planning, Decision, Execution). Rend un verdict
+des couches (Memory, Reasoning, Planning, Decision, Execution, Learning). Rend un verdict
 global : « BrainAI HEALTHY » ou « BrainAI DEGRADED ». Aucun composant n'est modifié.
 """
 
@@ -32,11 +32,13 @@ class Doctor:
         kno = b.knowledge.init()
         ker = b.kernel.init()
         stack_ok = b.cognition.available()
+        learn_eng = b.learning.engine(b.memory.store) if mem["ready"] else None
         availability = {
             "control_plane": cp["ready"], "memory": mem["ready"],
             "knowledge": kno["ready"], "kernel": ker["ready"],
             "reasoning": stack_ok, "planning": stack_ok,
             "decision": stack_ok, "execution": stack_ok,
+            "learning": learn_eng is not None,
         }
         unavailable = sorted(k for k, v in availability.items() if not v)
         if unavailable:
@@ -66,6 +68,11 @@ class Doctor:
                     audits[name] = bool(eng.audit().get("ok"))
                 except Exception:  # noqa: BLE001
                     audits[name] = False
+        if learn_eng is not None:
+            try:
+                audits["learning"] = bool(learn_eng.self_check().get("ok"))
+            except Exception:  # noqa: BLE001
+                audits["learning"] = False
         failed_audits = sorted(k for k, v in audits.items() if not v)
         if failed_audits:
             issues.append(f"audits KO : {', '.join(failed_audits)}")

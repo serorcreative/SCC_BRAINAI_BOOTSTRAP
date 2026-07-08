@@ -38,11 +38,13 @@ subscribers  EventRecorder (journal JSONL) · LifecycleWatcher (alertes)
 patrimony    PatrimonyManager (inventaire du patrimoine, lecture seule)
 components   adaptateurs Control Plane / Memory / Knowledge / Kernel (bootstrap dynamique)
 cognition    CognitiveStack (Reasoning / Planning / Decision / Execution câblés)
+learning     LearningLayer (Learning branché sur la mémoire vivante → propositions)
 agents       AgentRegistry (premiers agents depuis le catalogue)
 router       routage lexical déterministe (décision → decide ; sinon → Kernel)
 doctor       Doctor (diagnostic : patrimoine, disponibilité, santé, audits)
-bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/validate/execute · doctor)
-cli          scc-brainai (start / run / decide / validate / execute / doctor / events / status)
+bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/validate/execute · learn · doctor)
+cli          scc-brainai (start / run / decide / validate / execute / learn / learnings /
+             learn-validate / doctor / events / status)
 ```
 
 ## 4. Invariants tenus
@@ -57,7 +59,7 @@ cli          scc-brainai (start / run / decide / validate / execute / doctor / e
 
 ## 5. Prochaines incréments (backlog)
 
-- Brancher l'Event Bus aux couches supérieures (Kernel, Learning…) comme abonnés.
-- Ingérer les traces d'Execution (16) dans Memory au démarrage.
 - Étendre l'enregistrement d'agents au-delà des rôles pivots.
+- Réinjecter les apprentissages **validés** dans Reasoning / Decision (boucle fermée).
+- Continuité de session : persistance de l'état de démarrage entre invocations.
 - Exposer un mode « live » (démarrage persistant) une fois l'API réseau décidée (ADR).
