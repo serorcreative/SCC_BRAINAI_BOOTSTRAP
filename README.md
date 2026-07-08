@@ -63,6 +63,24 @@ mémorisé    : trace mem_000000000008 (7 événements)
 Chaque étape publie un événement sur l'Event Bus. Un composant absent n'arrête pas
 le démarrage : l'étape est signalée et BrainAI démarre en **mode dégradé**.
 
+## Event Bus vivant (observabilité)
+
+Deux abonnés sont branchés **avant toute publication** :
+
+- **EventRecorder** — persiste tous les événements dans `data/events.jsonl`
+  (journal d'observabilité append-only) ;
+- **LifecycleWatcher** — surveille le flux et lève des **alertes** sur les topics
+  d'échec (étape KO, Kernel indisponible, démarrage dégradé…).
+
+```bash
+scc-brainai events                       # journal complet du bus
+scc-brainai events --topic agent.registered
+```
+
+Le bus est un vrai **point d'abonnement** : `bus.subscribe(callback)` permet aux
+couches supérieures d'écouter le cycle de vie de BrainAI. En mode dégradé, les
+alertes sont affichées directement par `start` / `run`.
+
 ## Nouveaux sous-systèmes de cette couche
 
 - **Patrimony Manager** (`patrimony.py`) — inventaire en lecture seule de ce dont

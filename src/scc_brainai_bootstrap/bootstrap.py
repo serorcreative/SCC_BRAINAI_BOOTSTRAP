@@ -32,6 +32,7 @@ from scc_brainai_bootstrap.components import (
 from scc_brainai_bootstrap.core.config import BrainAIConfig, load_config
 from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
+from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
 
 READY_BANNER = "BrainAI READY"
 
@@ -40,6 +41,11 @@ class BrainAIBootstrap:
     def __init__(self, config: Optional[BrainAIConfig] = None):
         self.config = config or load_config()
         self.bus = EventBus(self.config.as_of)
+        # Abonnés d'observabilité branchés AVANT toute publication (bus vivant).
+        self.recorder = EventRecorder()
+        self.watcher = LifecycleWatcher()
+        self.bus.subscribe(self.recorder.on_event)
+        self.bus.subscribe(self.watcher.on_event)
         self.patrimony = PatrimonyManager(self.config)
         self.control_plane = ControlPlaneComponent(self.config)
         self.memory = MemoryComponent(self.config)
@@ -47,6 +53,16 @@ class BrainAIBootstrap:
         self.kernel = KernelComponent(self.config)
         self.agents = AgentRegistry(self.config)
         self._booted = False
+
+    @property
+    def events_path(self):
+        return self.config.data_dir / "events.jsonl"
+
+    def _persist_events(self) -> None:
+        try:
+            self.recorder.dump(self.events_path)
+        except Exception:  # noqa: BLE001 - persistance best-effort
+            pass
 
     def run(self, on_step: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
         """Exécute la séquence de démarrage et renvoie un rapport structuré."""
@@ -106,6 +122,7 @@ class BrainAIBootstrap:
             on_step({"n": 8, "name": "ready", "ok": overall, "detail": banner, "data": {}})
 
         self._booted = True
+        self._persist_events()
         return {
             "as_of": self.config.as_of,
             "ready": overall,
@@ -116,6 +133,11 @@ class BrainAIBootstrap:
             "agents": self.agents.to_list(),
             "events": self.bus.events,
             "event_count": len(self.bus),
+            "subscribers": {
+                "recorded": len(self.recorder),
+                "events_file": str(self.events_path),
+                "lifecycle": self.watcher.summary(),
+            },
         }
 
     # ================================================================== #
@@ -151,6 +173,7 @@ class BrainAIBootstrap:
             except Exception as exc:  # noqa: BLE001 - enregistrement best-effort
                 self.bus.publish("experience.record_failed", {"detail": str(exc)})
 
+        self._persist_events()
         return {
             "ok": bool(response.get("ok")),
             "query": query,
@@ -163,6 +186,7 @@ class BrainAIBootstrap:
             "synthesis": response.get("synthesis"),
             "provider": response.get("provider", {}).get("selected"),
             "recorded": recorded,
+            "alerts": self.watcher.alerts,
             "response": response,
         }
 

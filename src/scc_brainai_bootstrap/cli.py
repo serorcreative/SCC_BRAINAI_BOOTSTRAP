@@ -34,7 +34,15 @@ def cmd_start(args) -> int:
     report = boot.run(on_step=None if args.json else printer)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        _print_alerts(report.get("subscribers", {}).get("lifecycle", {}).get("alerts", []))
+        print(f"(event bus : {report['subscribers']['recorded']} événements journalisés)")
     return 0 if report["ready"] else 1
+
+
+def _print_alerts(alerts) -> None:
+    for a in alerts:
+        print(f"  ⚠ [{a['severity']}] {a['topic']} — {a['detail']}")
 
 
 def cmd_run(args) -> int:
@@ -54,8 +62,22 @@ def cmd_run(args) -> int:
     if result.get("recorded"):
         print(f"mémorisé    : trace {result['recorded']['trace_id']} "
               f"({result['recorded']['events']} événements)")
+    _print_alerts(result.get("alerts", []))
     print("\n--- synthèse ---")
     print(result["synthesis"])
+    return 0
+
+
+def cmd_events(args) -> int:
+    boot = _boot(args)
+    path = boot.events_path
+    if not path.exists():
+        boot.run()               # démarre pour peupler le journal du bus
+    events = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()] \
+        if path.exists() else boot.recorder.events
+    if args.topic:
+        events = [e for e in events if e["topic"] == args.topic]
+    print(json.dumps({"count": len(events), "events": events}, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -90,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--no-record", action="store_true", help="Ne pas mémoriser l'expérience.")
     p_run.add_argument("--json", action="store_true", help="Sortie JSON complète.")
     p_run.set_defaults(func=cmd_run)
+
+    p_events = sub.add_parser("events", help="Journal de l'Event Bus (observabilité).")
+    p_events.add_argument("--topic", default=None, help="Filtrer par topic.")
+    p_events.set_defaults(func=cmd_events)
 
     sub.add_parser("status", help="Patrimoine et disponibilité des sous-systèmes.").set_defaults(func=cmd_status)
     return parser
