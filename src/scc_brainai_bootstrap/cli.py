@@ -68,6 +68,40 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_decide(args) -> int:
+    result = _boot(args).decide(args.question, urgency=float(args.urgency))
+    if args.json or not result.get("ok"):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
+    print(f"décision    : {result['decision_id']}  (statut : {result['status']})")
+    print(f"retenue     : {result['selected']}  (classe : {result['class']})")
+    print("options     :")
+    for o in result["options"]:
+        print(f"  {'●' if o['selected'] else '○'} {o['name']} (score {o['score']})")
+    print("validation humaine requise avant exécution :")
+    for c in result["validation_conditions"]:
+        print(f"  - {c}")
+    print(f"\n→ valider : scc-brainai validate {result['decision_id']} --by <acteur>")
+    return 0
+
+
+def cmd_validate(args) -> int:
+    result = _boot(args).validate_decision(args.id, args.by, args.reason)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get("ok") else 1
+
+
+def cmd_execute(args) -> int:
+    result = _boot(args).execute_decision(args.id, actor=args.by)
+    if args.json or not result.get("ok"):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
+    print(f"exécution   : {result['run_id']}  (statut : {result['status']})")
+    for s in result["steps"]:
+        print(f"  [{s['status']}] {s['name']}  (job {s['job_id']})")
+    return 0
+
+
 def cmd_events(args) -> int:
     boot = _boot(args)
     path = boot.events_path
@@ -112,6 +146,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--no-record", action="store_true", help="Ne pas mémoriser l'expérience.")
     p_run.add_argument("--json", action="store_true", help="Sortie JSON complète.")
     p_run.set_defaults(func=cmd_run)
+
+    p_decide = sub.add_parser("decide", help="Délibérer et formaliser une décision candidate.")
+    p_decide.add_argument("question")
+    p_decide.add_argument("--urgency", default="0.3")
+    p_decide.add_argument("--json", action="store_true")
+    p_decide.set_defaults(func=cmd_decide)
+
+    p_val = sub.add_parser("validate", help="Valider humainement une décision.")
+    p_val.add_argument("id"); p_val.add_argument("--by", required=True); p_val.add_argument("--reason", default="")
+    p_val.set_defaults(func=cmd_validate)
+
+    p_exec = sub.add_parser("execute", help="Exécuter une décision validée (sous garde-fous).")
+    p_exec.add_argument("id"); p_exec.add_argument("--by", required=True)
+    p_exec.add_argument("--json", action="store_true")
+    p_exec.set_defaults(func=cmd_execute)
 
     p_events = sub.add_parser("events", help="Journal de l'Event Bus (observabilité).")
     p_events.add_argument("--topic", default=None, help="Filtrer par topic.")

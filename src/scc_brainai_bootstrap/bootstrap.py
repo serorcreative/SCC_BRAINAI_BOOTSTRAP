@@ -30,6 +30,7 @@ from scc_brainai_bootstrap.components import (
     MemoryComponent,
 )
 from scc_brainai_bootstrap.core.config import BrainAIConfig, load_config
+from scc_brainai_bootstrap.cognition import CognitiveStack
 from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
 from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
@@ -52,6 +53,7 @@ class BrainAIBootstrap:
         self.knowledge = KnowledgeComponent(self.config)
         self.kernel = KernelComponent(self.config)
         self.agents = AgentRegistry(self.config)
+        self.cognition = CognitiveStack(self.config)
         self._booted = False
 
     @property
@@ -188,6 +190,74 @@ class BrainAIBootstrap:
             "recorded": recorded,
             "alerts": self.watcher.alerts,
             "response": response,
+        }
+
+    # ================================================================== #
+    # Grande boucle cognitive : Reasoning -> Decision -> [humain] -> Execution
+    # ================================================================== #
+    def decide(self, question: str, urgency: float = 0.3) -> Dict[str, Any]:
+        """Délibère (Reasoning) puis formalise une décision candidate (Decision).
+
+        La décision produite est **proposée** : elle exige une validation humaine
+        avant toute exécution. Aucune couche n'est modifiée."""
+        self.config.ensure_directories()
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        delib = self.cognition.reasoning.reason(question)
+        rec = self.cognition.decision.decide(
+            question, deliberation_id=delib["id"], urgency=urgency)
+        self.bus.publish("decision.proposed",
+                         {"decision_id": rec["id"], "subject": question})
+        self._persist_events()
+        selected = next((o for o in rec["options"] if o["id"] == rec["selected_id"]), {})
+        return {
+            "ok": True,
+            "question": question,
+            "deliberation_id": delib["id"],
+            "decision_id": rec["id"],
+            "selected": selected.get("name"),
+            "class": rec["qualification"].get("class"),
+            "status": rec["status"],
+            "options": [{"name": o["name"], "score": o["score"], "selected": o["selected"]}
+                        for o in rec["options"]],
+            "validation_conditions": rec["validation_conditions"],
+            "needs_human_validation": True,
+        }
+
+    def validate_decision(self, decision_id: str, approver: str, reason: str = "") -> Dict[str, Any]:
+        """Validation humaine d'une décision candidate (garde-fou de souveraineté)."""
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        try:
+            res = self.cognition.decision.validate(decision_id, approver, reason)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+        self.bus.publish("decision.validated", {"decision_id": decision_id, "by": approver})
+        self._persist_events()
+        return {"ok": True, "decision_id": decision_id, "status": res.get("status")}
+
+    def execute_decision(self, decision_id: str, actor: str) -> Dict[str, Any]:
+        """Prépare et exécute une décision **validée** (Execution -> Runtime), sous
+        garde-fous. Aucune exécution sans manifeste validé ni acteur autorisé."""
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        run = self.cognition.execution.prepare(decision_id, actor=actor)
+        self.bus.publish("execution.prepared",
+                         {"run_id": run["id"], "status": run["status"]})
+        if run["status"] != "prepared":
+            self._persist_events()
+            return {"ok": False, "decision_id": decision_id, "run_id": run["id"],
+                    "status": run["status"], "refusals": run["guards"]["refusals"]}
+        done = self.cognition.execution.execute(run["id"], actor=actor)
+        self.bus.publish("execution.done", {"run_id": done["id"], "status": done["status"]})
+        self._persist_events()
+        return {
+            "ok": done["status"] == "succeeded",
+            "decision_id": decision_id,
+            "run_id": done["id"],
+            "status": done["status"],
+            "steps": [{"name": s["name"], "status": s["status"], "job_id": s["job_id"]}
+                      for s in done["steps"]],
         }
 
 

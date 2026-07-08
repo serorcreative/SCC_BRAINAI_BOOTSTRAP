@@ -39,6 +39,7 @@ class BrainAIConfig:
     data_dir: Path = BOOTSTRAP_ROOT / "data"
     as_of: str = DEFAULT_AS_OF
     first_agents: List[str] = field(default_factory=lambda: list(DEFAULT_FIRST_AGENTS))
+    authorized_actors: List[str] = field(default_factory=list)
     extra: Dict[str, Any] = field(default_factory=dict)
 
     # -- emplacements des composants réutilisés ------------------------- #
@@ -57,6 +58,26 @@ class BrainAIConfig:
     @property
     def kernel_src(self) -> Path:
         return self.scc_root / "10_BRAINAI" / "src"
+
+    @property
+    def reasoning_src(self) -> Path:
+        return self.scc_root / "13_BRAINAI_REASONING" / "src"
+
+    @property
+    def planning_src(self) -> Path:
+        return self.scc_root / "14_BRAINAI_PLANNING" / "src"
+
+    @property
+    def decision_src(self) -> Path:
+        return self.scc_root / "15_BRAINAI_DECISION" / "src"
+
+    @property
+    def execution_src(self) -> Path:
+        return self.scc_root / "16_BRAINAI_EXECUTION" / "src"
+
+    @property
+    def cognition_data(self) -> Path:
+        return self.data_dir / "cognition"
 
     @property
     def agents_dir(self) -> Path:
@@ -106,6 +127,7 @@ def load_config(path: Optional[Path] = None) -> BrainAIConfig:
         config.data_dir = _resolve(base, paths["data_dir"])
     config.as_of = str(raw.get("as_of", DEFAULT_AS_OF))
     config.first_agents = list(raw.get("first_agents", config.first_agents))
+    config.authorized_actors = list(raw.get("authorized_actors", config.authorized_actors))
     config.extra = dict(raw.get("extra", {}))
     return config
 

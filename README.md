@@ -49,6 +49,31 @@ mémorisé    : trace mem_000000000008 (7 événements)
 (cognition déterministe de BrainAI, sans IA externe)
 ```
 
+## La grande boucle cognitive (décider → valider → exécuter)
+
+Pour les demandes décisionnelles, BrainAI enchaîne **Reasoning (13) → Decision (15)
+→ [validation humaine] → Execution (16) → Runtime (07)**, toutes couches câblées et
+gouvernées :
+
+```bash
+scc-brainai decide "Faut-il publier l API maintenant ou différer ?"
+#   → décision candidate (proposée) + conditions de validation humaine
+
+scc-brainai execute <decision_id> --by frederique
+#   → REFUSÉ : décision non validée (garde-fou)
+
+scc-brainai validate <decision_id> --by frederique --reason "go"
+#   → décision validée (humain)
+
+scc-brainai execute <decision_id> --by frederique
+#   → exécution déléguée au Runtime : succeeded
+```
+
+Garde-fous : **aucune exécution sans décision validée** ni **acteur autorisé** ; la
+décision reste *proposée* jusqu'à validation humaine explicite. État persistant sous
+`data/cognition/` (Reasoning / Planning / Decision / Execution). Aucun composant
+n'est modifié : tout passe par leurs interfaces publiques.
+
 ## Séquence de démarrage (les 8 étapes)
 
 1. **Configuration** — charge `config/brainai.json` (scc_root, `as_of`, premiers agents).
