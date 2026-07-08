@@ -94,6 +94,25 @@ def cmd_decide(args) -> int:
     return _print_decision(result)
 
 
+def cmd_plan(args) -> int:
+    result = _boot(args).plan(args.objective)
+    if args.json or not result.get("ok"):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
+    print(f"objectif    : {result['objective']}")
+    print(f"plan        : {result['planset_id']}  (stratégie : {result['strategy']})")
+    print(f"tâches      : {result['task_count']}  "
+          f"(dont {len(result['learning_tasks'])} issue(s) d'apprentissages validés)")
+    if result["learning_tasks"]:
+        print("issues d'apprentissages validés (boucle fermée) :")
+        for t in result["learning_tasks"]:
+            print(f"  ⟲ {t['title']}  ({', '.join(t['sources'])})")
+    else:
+        print("(aucune tâche issue d'apprentissage : valider des recommandations via learn-validate)")
+    print("plan proposé — validation humaine requise avant exécution.")
+    return 0
+
+
 def cmd_validate(args) -> int:
     result = _boot(args).validate_decision(args.id, args.by, args.reason)
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -228,6 +247,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_decide.add_argument("--urgency", default="0.3")
     p_decide.add_argument("--json", action="store_true")
     p_decide.set_defaults(func=cmd_decide)
+
+    p_plan = sub.add_parser("plan", help="Planifier un objectif (boucle apprenante : recommandations validées → tâches).")
+    p_plan.add_argument("objective")
+    p_plan.add_argument("--json", action="store_true")
+    p_plan.set_defaults(func=cmd_plan)
 
     p_val = sub.add_parser("validate", help="Valider humainement une décision.")
     p_val.add_argument("id"); p_val.add_argument("--by", required=True); p_val.add_argument("--reason", default="")

@@ -8,7 +8,7 @@ modifier aucun. Stdlib pur, déterministe, sans réseau.
 
 from __future__ import annotations
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from scc_brainai_bootstrap.bootstrap import READY_BANNER, BrainAIBootstrap
 from scc_brainai_bootstrap.core.config import BrainAIConfig, load_config

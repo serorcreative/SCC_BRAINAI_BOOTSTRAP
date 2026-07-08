@@ -7,13 +7,17 @@ dossier du bootstrap (`data/cognition/…`). Aucun composant n'est modifié.
 
 Chaîne : délibérer (Reasoning) → formaliser une décision gouvernée (Decision) →
 [validation humaine] → exécuter sous contrôle (Execution → Runtime).
+
+Boucle apprenante fermée : un moteur Learning (12) partagé peut être injecté ; ses
+apprentissages **validés** nourrissent alors Planning (recommandations → tâches) et
+Decision (traçabilité). Seules les recommandations validées sont exploitées.
 """
 
 from __future__ import annotations
 
 import importlib
 import sys
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from scc_brainai_bootstrap.core.config import BrainAIConfig
 
@@ -27,12 +31,17 @@ def _add_path(path) -> bool:
 
 
 class CognitiveStack:
-    def __init__(self, config: BrainAIConfig):
+    def __init__(self, config: BrainAIConfig,
+                 learning_provider: Optional[Callable[[], Any]] = None):
         self._config = config
+        # Fournit (à la construction) le moteur Learning partagé : ferme la boucle
+        # apprenante (les apprentissages *validés* nourrissent Planning et Decision).
+        self._learning_provider = learning_provider
         self._reasoning = None
         self._planning = None
         self._decision = None
         self._execution = None
+        self._learns = False        # un moteur Learning a-t-il été injecté ?
         self._built = False
         self._error = ""
 
@@ -49,6 +58,12 @@ class CognitiveStack:
     def error(self) -> str:
         return self._error
 
+    @property
+    def learns(self) -> bool:
+        """True si un moteur Learning est branché (boucle apprenante fermée)."""
+        self._build()
+        return self._learns
+
     def _build(self) -> None:
         if self._built:
             return
@@ -58,26 +73,39 @@ class CognitiveStack:
                 raise RuntimeError(f"couche introuvable : {p}")
         cog = c.cognition_data
 
+        # Moteur Learning partagé (facultatif) : ferme la boucle apprenante. Il lit le
+        # registre d'apprentissages du bootstrap ; seules les recommandations *validées*
+        # sont exploitées (garde-fou porté par Learning lui-même).
+        learn_eng = None
+        if self._learning_provider is not None:
+            try:
+                learn_eng = self._learning_provider()
+            except Exception:  # noqa: BLE001 - dégradation gracieuse
+                learn_eng = None
+        self._learns = learn_eng is not None
+
         # Reasoning (13)
         rmod = importlib.import_module("scc_brainai_reasoning")
         rcfg = rmod.ReasoningConfig(data_dir=cog / "reasoning", ground_facts=False, as_of=c.as_of)
         self._reasoning = rmod.ReasoningEngine(config=rcfg)
 
-        # Planning (14) — intègre Reasoning (instance partagée)
+        # Planning (14) — intègre Reasoning + Learning (instances partagées)
         pmod = importlib.import_module("scc_brainai_planning")
         insight_mod = importlib.import_module("scc_brainai_planning.sources.insight_source")
-        pcfg = pmod.PlanningConfig(data_dir=cog / "planning", integrate_learning=False,
+        pcfg = pmod.PlanningConfig(data_dir=cog / "planning", integrate_learning=self._learns,
                                    integrate_reasoning=True, as_of=c.as_of)
         self._planning = pmod.PlanningEngine(
-            config=pcfg, insight_source=insight_mod.InsightSource(pcfg, reasoning_engine=self._reasoning))
+            config=pcfg, insight_source=insight_mod.InsightSource(
+                pcfg, reasoning_engine=self._reasoning, learning_engine=learn_eng))
 
-        # Decision (15) — passerelle vers Reasoning + Planning (instances partagées)
+        # Decision (15) — passerelle vers Reasoning + Planning + Learning (instances partagées)
         dmod = importlib.import_module("scc_brainai_decision")
         dgw_mod = importlib.import_module("scc_brainai_decision.sources.decision_gateway")
-        dcfg = dmod.DecisionConfig(data_dir=cog / "decision", integrate_learning=False, as_of=c.as_of)
+        dcfg = dmod.DecisionConfig(data_dir=cog / "decision", integrate_learning=self._learns, as_of=c.as_of)
         self._decision = dmod.DecisionEngine(
             config=dcfg, gateway=dgw_mod.DecisionGateway(
-                dcfg, reasoning_engine=self._reasoning, planning_engine=self._planning))
+                dcfg, reasoning_engine=self._reasoning, planning_engine=self._planning,
+                learning_engine=learn_eng))
 
         # Execution (16) — passerelle vers Decision + Planning (instances partagées)
         emod = importlib.import_module("scc_brainai_execution")

@@ -140,6 +140,31 @@ apprentissages est persistant sous `data/learning/` (une décision humaine survi
 redémarrages). La boucle **vécu → mémoire → apprentissage** se referme ici, sans qu'aucun
 composant ne soit modifié : Learning n'écrit que dans son propre registre de propositions.
 
+## La boucle fermée (apprentissages validés → cognition)
+
+Un apprentissage **validé** ne reste pas inerte : il **nourrit la cognition**. Le moteur
+Learning partagé est injecté dans Planning (14) et Decision (15) ; **seules les
+recommandations validées** sont exploitées (garde-fou porté par Learning).
+
+```bash
+scc-brainai plan "Améliorer la gouvernance documentaire"
+```
+
+Avant validation, le plan ignore les apprentissages ; après `learn-validate`, chaque
+**recommandation validée devient une tâche d'application** du plan :
+
+```
+tâches      : 12  (dont 2 issue(s) d'apprentissages validés)
+issues d'apprentissages validés (boucle fermée) :
+  ⟲ Appliquer la recommandation : Recommandation : agent mobilization  (learning:recommendation_b735e1245855)
+plan proposé — validation humaine requise avant exécution.
+```
+
+De même, `decide` **cite les apprentissages validés** dans la traçabilité de la décision
+(`applied_learnings`). La boucle complète se referme : **vécu → mémoire → apprentissage →
+validation humaine → cognition** — sans auto-modification ni auto-application, et de façon
+déterministe. Le plan produit reste une **proposition** soumise à validation.
+
 ## Séquence de démarrage (les 8 étapes)
 
 1. **Configuration** — charge `config/brainai.json` (scc_root, `as_of`, premiers agents).
@@ -214,7 +239,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 92 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 103 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

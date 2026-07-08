@@ -56,8 +56,10 @@ class BrainAIBootstrap:
         self.knowledge = KnowledgeComponent(self.config)
         self.kernel = KernelComponent(self.config)
         self.agents = AgentRegistry(self.config)
-        self.cognition = CognitiveStack(self.config)
         self.learning = LearningLayer(self.config)
+        # La cognition reçoit un fournisseur du moteur Learning partagé : la boucle
+        # apprenante est fermée (apprentissages validés → Planning / Decision).
+        self.cognition = CognitiveStack(self.config, learning_provider=self._provide_learning_engine)
         self._booted = False
 
     @property
@@ -207,11 +209,14 @@ class BrainAIBootstrap:
         self.config.ensure_directories()
         if not self.cognition.available():
             return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        # Boucle fermée : les apprentissages *validés* informent la décision (traçabilité).
+        learning_ids = self._validated_learning_ids()
         delib = self.cognition.reasoning.reason(question)
         rec = self.cognition.decision.decide(
-            question, deliberation_id=delib["id"], urgency=urgency)
+            question, deliberation_id=delib["id"], urgency=urgency, learning_ids=learning_ids)
         self.bus.publish("decision.proposed",
-                         {"decision_id": rec["id"], "subject": question})
+                         {"decision_id": rec["id"], "subject": question,
+                          "learnings": len(learning_ids)})
         self._persist_events()
         selected = next((o for o in rec["options"] if o["id"] == rec["selected_id"]), {})
         return {
@@ -225,6 +230,7 @@ class BrainAIBootstrap:
             "options": [{"name": o["name"], "score": o["score"], "selected": o["selected"]}
                         for o in rec["options"]],
             "validation_conditions": rec["validation_conditions"],
+            "applied_learnings": rec["traceability"].get("learnings", []),
             "needs_human_validation": True,
         }
 
@@ -269,16 +275,63 @@ class BrainAIBootstrap:
             "memory_ingested": ingested,
         }
 
+    def plan(self, objective: str) -> Dict[str, Any]:
+        """Planifie un objectif via Planning (14), **boucle apprenante fermée** : chaque
+        **recommandation validée** de Learning devient une tâche d'application du plan.
+        Le plan reste une proposition. Aucune couche n'est modifiée."""
+        if not self._booted:
+            self.run()
+        self.config.ensure_directories()
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        self.memory.init()                       # garantit le moteur Learning branché
+        ps = self.cognition.planning.plan(objective)
+        learning_tasks = [
+            {"id": t["id"], "title": t["title"], "sources": t["sources"]}
+            for t in ps["tasks"] if "learning" in t.get("tags", [])
+        ]
+        self.bus.publish("plan.created",
+                         {"planset_id": ps["id"], "tasks": len(ps["tasks"]),
+                          "from_learning": len(learning_tasks)})
+        self._persist_events()
+        return {
+            "ok": True,
+            "objective": objective,
+            "planset_id": ps["id"],
+            "strategy": ps["recommended"]["strategy_name"],
+            "task_count": len(ps["tasks"]),
+            "tasks": [{"title": t["title"], "phase": t["phase"], "kind": t["kind"],
+                       "tags": t["tags"]} for t in ps["tasks"]],
+            "learning_tasks": learning_tasks,
+            "applied_learnings": ps["traceability"].get("learnings", []),
+            "learns": self.cognition.learns,
+            "needs_human_validation": True,
+        }
+
     # ================================================================== #
     # Chaîne apprenante : Memory (vécu) -> Learning (apprentissages proposés)
     # ================================================================== #
+    def _provide_learning_engine(self):
+        """Fournit le moteur Learning partagé à la cognition (boucle fermée). Garantit
+        qu'il est branché sur la **mémoire vivante** avant sa mise en cache."""
+        self.memory.init()
+        return self.learning.engine(self.memory.store)
+
     def _learning_engine(self):
         """Démarre si besoin, initialise Memory, et retourne le moteur Learning
         branché sur la **mémoire vivante** du bootstrap (ou None si indisponible)."""
         if not self._booted:
             self.run()
-        self.memory.init()
-        return self.learning.engine(self.memory.store)
+        return self._provide_learning_engine()
+
+    def _validated_learning_ids(self, limit: int = 50):
+        """Ids des **recommandations validées** — la seule matière réinjectée dans la
+        cognition (garde-fou : rien de non validé n'influence une décision/un plan)."""
+        engine = self.learning.engine(self.memory.store)
+        if engine is None:
+            return []
+        return [it["id"] for it in engine.search(kind="recommendation",
+                                                 status="validated", limit=limit)]
 
     def learn(self) -> Dict[str, Any]:
         """Analyse le vécu conservé en Memory (11) et en dérive des **apprentissages

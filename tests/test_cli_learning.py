@@ -43,6 +43,25 @@ def test_cli_learn_json(tmp_path, capsys):
     assert data["total_learnings"] >= 0
 
 
+def test_cli_plan_closed_loop(tmp_path, capsys):
+    cfg = _cli_config(tmp_path)
+    _seed(cfg)
+    main(["--config", str(cfg), "learn"])
+    # valider toutes les recommandations
+    capsys.readouterr()
+    main(["--config", str(cfg), "learnings", "--kind", "recommendation", "--json"])
+    recs = json.loads(capsys.readouterr().out)["items"]
+    for r in recs:
+        main(["--config", str(cfg), "learn-validate", r["id"], "--by", "frederique"])
+    capsys.readouterr()
+    rc = main(["--config", str(cfg), "plan", "Améliorer la gouvernance documentaire"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "plan" in out and "tâches" in out
+    if recs:
+        assert "boucle fermée" in out
+
+
 def test_cli_learnings_and_validate(tmp_path, capsys):
     cfg = _cli_config(tmp_path)
     _seed(cfg)
