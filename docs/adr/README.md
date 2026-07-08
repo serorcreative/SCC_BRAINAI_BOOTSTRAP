@@ -15,8 +15,8 @@ et ses conséquences. Voir la direction d'ensemble : [`../ARCHITECTURE_UI.md`](.
 | [ADR-UI-006](ADR-UI-006-client-typescript.md) | Client TypeScript (hybride) | ✅ Accepté |
 | [ADR-UI-010](ADR-UI-010-contrat-axe-architectural.md) | Le Contrat comme axe architectural | ✅ Accepté (conceptuel ; réalisation différée) |
 | [ADR-UI-007](ADR-UI-007-desktop-tauri.md) | Cible Desktop (Tauri) | ✅ Accepté (shell local d'abord ; distribuable différé) |
-| ADR-UI-004 | Authentification & accès distant | ⏳ Ouvert (bloque le distant/mobile-hors-machine) |
-| ADR-UI-008 | Stratégie Mobile (Capacitor) | ⏳ Ouvert |
+| [ADR-UI-008](ADR-UI-008-mobile-capacitor.md) | Cible Mobile (Capacitor) | ✅ Conteneur accepté · ⏳ implémentation différée (conditionnée à ADR-UI-004) |
+| ADR-UI-004 | Authentification & accès réseau/distant | ⏳ Ouvert (bloque le distant **et le mobile**) |
 | ADR-UI-009 | État & offline | ⏳ Ouvert |
 
 ## Doctrine permanente de BrainAI
