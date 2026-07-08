@@ -12,8 +12,9 @@ et ses conséquences. Voir la direction d'ensemble : [`../ARCHITECTURE_UI.md`](.
 | [ADR-UI-002](ADR-UI-002-protocole-transport.md) | Protocole de transport | ✅ Accepté |
 | [ADR-UI-003](ADR-UI-003-dependances-transport-python.md) | Dépendances transport Python | ✅ Accepté |
 | [ADR-UI-005](ADR-UI-005-extraction-presentation.md) | Extraction de `SCC_BRAINAI_PRESENTATION` | ✅ Accepté (différée, guidée par l'usage) |
+| [ADR-UI-006](ADR-UI-006-client-typescript.md) | Client TypeScript (hybride) | ✅ Accepté |
+| [ADR-UI-010](ADR-UI-010-contrat-axe-architectural.md) | Le Contrat comme axe architectural | ✅ Accepté (conceptuel ; réalisation différée) |
 | ADR-UI-004 | Authentification & accès distant | ⏳ Ouvert (bloque le distant/mobile-hors-machine) |
-| ADR-UI-006 | Codegen du client TypeScript | ⏳ Ouvert |
 | ADR-UI-007 | Packaging Desktop (Tauri + sidecar) | ⏳ Ouvert |
 | ADR-UI-008 | Stratégie Mobile (Capacitor) | ⏳ Ouvert |
 | ADR-UI-009 | État & offline | ⏳ Ouvert |
@@ -30,10 +31,19 @@ Ces règles s'appliquent à **tous** les BUILD et chantiers futurs :
 6. **Le transport n'expose jamais une implémentation — il expose uniquement un contrat.**
    (Vrai quels que soient les transports futurs : HTTP, stdio, gRPC, etc.)
 
-Sens de dépendance, strict et non contournable :
+**Le Contrat est l'axe architectural** (ADR-UI-010) et la **source de vérité** :
 
 ```
-UI  →  Transport  →  Presentation (contrat)  →  Bootstrap (cerveau)
+        Contrat (source de vérité : opérations · enveloppe · version · describe())
+      ▲ implémente     ▲ sert          ▲ reflète        ▲ consomme
+ Presentation       Transport         Client            UI
+```
+
+Sens de dépendance *physique*, strict et non contournable :
+
+```
+UI  →  Transport  →  Presentation (implémente le Contrat)  →  Bootstrap (cerveau)
 ```
 
 Le cerveau reste **pur** : aucune dépendance réseau/UI ne remonte jamais dedans.
+OpenAPI, s'il apparaît un jour, n'est qu'un **export** du Contrat — jamais la source.
