@@ -14,8 +14,8 @@ et ses conséquences. Voir la direction d'ensemble : [`../ARCHITECTURE_UI.md`](.
 | [ADR-UI-005](ADR-UI-005-extraction-presentation.md) | Extraction de `SCC_BRAINAI_PRESENTATION` | ✅ Accepté (différée, guidée par l'usage) |
 | [ADR-UI-006](ADR-UI-006-client-typescript.md) | Client TypeScript (hybride) | ✅ Accepté |
 | [ADR-UI-010](ADR-UI-010-contrat-axe-architectural.md) | Le Contrat comme axe architectural | ✅ Accepté (conceptuel ; réalisation différée) |
+| [ADR-UI-007](ADR-UI-007-desktop-tauri.md) | Cible Desktop (Tauri) | ✅ Accepté (shell local d'abord ; distribuable différé) |
 | ADR-UI-004 | Authentification & accès distant | ⏳ Ouvert (bloque le distant/mobile-hors-machine) |
-| ADR-UI-007 | Packaging Desktop (Tauri + sidecar) | ⏳ Ouvert |
 | ADR-UI-008 | Stratégie Mobile (Capacitor) | ⏳ Ouvert |
 | ADR-UI-009 | État & offline | ⏳ Ouvert |
 
@@ -30,6 +30,9 @@ Ces règles s'appliquent à **tous** les BUILD et chantiers futurs :
 5. **L'interface présente** — elle n'agit jamais d'elle-même ; l'humain valide les actions gouvernées.
 6. **Le transport n'expose jamais une implémentation — il expose uniquement un contrat.**
    (Vrai quels que soient les transports futurs : HTTP, stdio, gRPC, etc.)
+7. **Le shell Desktop ne porte jamais de logique métier** — il gère uniquement le cycle de
+   vie de l'application (fenêtre, sidecar, intégration OS, lancement, arrêt). Toute logique
+   fonctionnelle reste dans le Bootstrap, la Presentation ou le Contrat.
 
 **Le Contrat est l'axe architectural** (ADR-UI-010) et la **source de vérité** :
 

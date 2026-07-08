@@ -44,7 +44,10 @@ Doctrine permanente de BrainAI (6 règles) :
 > 1. le registre décrit · 2. le Bootstrap orchestre · 3. les moteurs exécutent ·
 > 4. `overview` observe · 5. **l'interface présente — elle n'agit jamais d'elle-même** ·
 > 6. **le transport n'expose jamais une implémentation — uniquement un contrat**
->    (vrai quels que soient les transports futurs : HTTP, stdio, gRPC, …).
+>    (vrai quels que soient les transports futurs : HTTP, stdio, gRPC, …) ·
+> 7. **le shell Desktop ne porte jamais de logique métier** — il gère uniquement le cycle de
+>    vie de l'app (fenêtre, sidecar, intégration OS, lancement, arrêt) ; toute logique reste
+>    dans le Bootstrap, la Presentation ou le Contrat.
 
 Les décisions de transport sont figées dans les [ADR](adr/README.md) (ADR-UI-001/002/003/005).
 
@@ -245,9 +248,8 @@ Décisions figées et sujets ouverts. Détail : [`docs/adr/`](adr/README.md).
 | [**ADR-UI-002**](adr/ADR-UI-002-protocole-transport.md) | Protocole de transport | ✅ **Accepté** — HTTP/JSON canonique, `POST /v1/{operation}` |
 | [**ADR-UI-003**](adr/ADR-UI-003-dependances-transport-python.md) | Dépendances transport | ✅ **Accepté** — stdlib `http.server` d'abord ; migration ASGI sur besoin objectif |
 | [**ADR-UI-005**](adr/ADR-UI-005-extraction-presentation.md) | Extraction Presentation | ✅ **Accepté** — **différée**, guidée par l'usage ; transport côté produit d'ici là |
+| [**ADR-UI-007**](adr/ADR-UI-007-desktop-tauri.md) | Cible Desktop (Tauri) | ✅ **Accepté** — shell local d'abord ; sidecar via env ; fetch = plugin HTTP Tauri ; distribuable différé |
 | **ADR-UI-004** | Authentification & accès distant | ⏳ Ouvert — requis dès qu'on sort du loopback (Étape 2+) |
-| **ADR-UI-006** | Codegen du client | ⏳ Ouvert — `describe()` (maison) vs OpenAPI (Étape 1/2) |
-| **ADR-UI-007** | Packaging Desktop (Tauri) | ⏳ Ouvert — bundling du sidecar Python (Étape Desktop) |
 | **ADR-UI-008** | Stratégie Mobile (Capacitor) | ⏳ Ouvert — online-only vs offline (Étape Mobile) |
 | **ADR-UI-009** | État & offline | ⏳ Ouvert — cache, persistance, hors-ligne (Étape 2+) |
 
