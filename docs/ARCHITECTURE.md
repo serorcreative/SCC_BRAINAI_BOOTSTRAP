@@ -75,6 +75,7 @@ cli          scc-brainai — 1ʳᵉ interface, passe exclusivement par la Presen
 - Cataloguer les 16 autres fiches SCC (étendre FicheSource au-delà des pivots) + leurs capacités.
 - Figer la taxonomie des capacités (V1 → stable) une fois la gouvernance SCC prononcée.
 - Métadonnées d'orchestration réelles (coût, latence, fiabilité) pour un routage multi-fournisseurs.
-- Première interface réelle branchée sur la Presentation Layer (voir `docs/ARCHITECTURE_SNAPSHOT_v0.12.0.md`).
+- Première interface réelle branchée sur la Presentation Layer — direction figée dans
+  [`docs/ARCHITECTURE_UI.md`](ARCHITECTURE_UI.md) (phase « Produit BrainAI »).
 - Extraction de `presentation/` vers `SCC_BRAINAI_PRESENTATION` une fois le contrat éprouvé (≥ 1 interface réelle / 2ᵉ consommateur).
 - Exposer un mode « live » réseau (démon/service) une fois l'API réseau décidée (ADR).
