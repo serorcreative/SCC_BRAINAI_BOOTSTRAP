@@ -251,7 +251,7 @@ Décisions figées et sujets ouverts. Détail : [`docs/adr/`](adr/README.md).
 | [**ADR-UI-007**](adr/ADR-UI-007-desktop-tauri.md) | Cible Desktop (Tauri) | ✅ **Accepté** — shell local d'abord ; sidecar via env ; fetch = plugin HTTP Tauri ; distribuable différé |
 | [**ADR-UI-008**](adr/ADR-UI-008-mobile-capacitor.md) | Cible Mobile (Capacitor) | ✅ **Conteneur accepté · impl. différée** — bloqué par le réseau (loopback impossible sur mobile), conditionné à ADR-UI-004 |
 | [**ADR-UI-004**](adr/ADR-UI-004-acces-reseau-securise.md) | Accès réseau sécurisé | ✅ **Architecture acceptée · impl. différée** — mode réseau opt-in (LAN TLS+pairing / overlay chiffré) ; exposition publique rejetée par défaut ; débloque distant **et** mobile |
-| **ADR-UI-009** | État & offline | ⏳ Ouvert — cache, persistance, hors-ligne (Étape 2+) |
+| [**ADR-UI-009**](adr/ADR-UI-009-etat-cache-offline.md) | État, cache & offline | ✅ **Architecture acceptée · impl. différée** — l'UI reflète (jamais ne possède) ; cache non autoritatif ; offline = instantané lecture seule ; aucune techno de persistance choisie |
 
 ---
 

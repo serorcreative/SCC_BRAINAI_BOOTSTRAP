@@ -17,7 +17,7 @@ et ses conséquences. Voir la direction d'ensemble : [`../ARCHITECTURE_UI.md`](.
 | [ADR-UI-007](ADR-UI-007-desktop-tauri.md) | Cible Desktop (Tauri) | ✅ Accepté (shell local d'abord ; distribuable différé) |
 | [ADR-UI-008](ADR-UI-008-mobile-capacitor.md) | Cible Mobile (Capacitor) | ✅ Conteneur accepté · ⏳ implémentation différée (conditionnée à ADR-UI-004) |
 | [ADR-UI-004](ADR-UI-004-acces-reseau-securise.md) | Accès réseau sécurisé | ✅ Architecture acceptée · ⏳ impl. différée · ❌ exposition publique rejetée par défaut |
-| ADR-UI-009 | État & offline | ⏳ Ouvert |
+| [ADR-UI-009](ADR-UI-009-etat-cache-offline.md) | État, cache & offline | ✅ Architecture acceptée · ⏳ impl. différée · 🚫 aucune techno de persistance choisie |
 
 ## Doctrine permanente de BrainAI
 
