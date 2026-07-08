@@ -74,6 +74,10 @@ décision reste *proposée* jusqu'à validation humaine explicite. État persist
 `data/cognition/` (Reasoning / Planning / Decision / Execution). Aucun composant
 n'est modifié : tout passe par leurs interfaces publiques.
 
+Après `execute`, les **traces d'exécution** produites par Execution (16) sont
+**ingérées dans Memory (11)** — le vécu d'exécution devient mémoire, exploitable plus
+tard par Learning. La boucle vécu → mémoire se referme aussi sur l'exécution.
+
 ## Séquence de démarrage (les 8 étapes)
 
 1. **Configuration** — charge `config/brainai.json` (scc_root, `as_of`, premiers agents).

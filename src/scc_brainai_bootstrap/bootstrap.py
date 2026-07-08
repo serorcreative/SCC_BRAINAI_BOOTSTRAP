@@ -250,6 +250,10 @@ class BrainAIBootstrap:
                     "status": run["status"], "refusals": run["guards"]["refusals"]}
         done = self.cognition.execution.execute(run["id"], actor=actor)
         self.bus.publish("execution.done", {"run_id": done["id"], "status": done["status"]})
+        # Refermer la boucle vécu -> mémoire : le vécu d'exécution devient mémoire.
+        ingested = self._ingest_execution_traces(done)
+        if ingested:
+            self.bus.publish("execution.memorized", {"run_id": done["id"], "traces": ingested})
         self._persist_events()
         return {
             "ok": done["status"] == "succeeded",
@@ -258,7 +262,32 @@ class BrainAIBootstrap:
             "status": done["status"],
             "steps": [{"name": s["name"], "status": s["status"], "job_id": s["job_id"]}
                       for s in done["steps"]],
+            "memory_ingested": ingested,
         }
+
+    def _ingest_execution_traces(self, run: Dict[str, Any]) -> int:
+        """Ingère les traces d'exécution dans Memory (11) via son interface publique.
+
+        Aucune modification de Memory : simples écritures d'événements (soumises aux
+        garde-fous de confidentialité de Memory). Referme la boucle vécu -> mémoire."""
+        if self.memory.store is None:
+            self.memory.init()
+        store = self.memory.store
+        if store is None:
+            return 0
+        session = store.open_session(actor="execution",
+                                     meta={"run_id": run.get("id"), "kind": "execution"})
+        count = 0
+        for tr in run.get("traces_for_memory", []):
+            try:
+                store.record_event(tr.get("subtype", "execution.event"),
+                                   dict(tr.get("data", {})), session_id=session.id,
+                                   actor=tr.get("actor", "brainai"),
+                                   tags=["execution", "ingested"])
+                count += 1
+            except Exception:  # noqa: BLE001 - ingestion best-effort
+                continue
+        return count
 
 
 __all__ = ["BrainAIBootstrap", "READY_BANNER"]

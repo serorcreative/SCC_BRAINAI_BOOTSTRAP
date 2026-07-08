@@ -99,6 +99,8 @@ def cmd_execute(args) -> int:
     print(f"exécution   : {result['run_id']}  (statut : {result['status']})")
     for s in result["steps"]:
         print(f"  [{s['status']}] {s['name']}  (job {s['job_id']})")
+    if result.get("memory_ingested"):
+        print(f"mémorisé    : {result['memory_ingested']} trace(s) d'exécution → Memory")
     return 0
 
 
