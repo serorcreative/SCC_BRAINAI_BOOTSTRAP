@@ -31,6 +31,7 @@ from scc_brainai_bootstrap.components import (
 )
 from scc_brainai_bootstrap.core.config import BrainAIConfig, load_config
 from scc_brainai_bootstrap.cognition import CognitiveStack
+from scc_brainai_bootstrap.doctor import Doctor
 from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
 from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
@@ -264,6 +265,17 @@ class BrainAIBootstrap:
                       for s in done["steps"]],
             "memory_ingested": ingested,
         }
+
+    # ================================================================== #
+    # Diagnostic complet
+    # ================================================================== #
+    def doctor(self) -> Dict[str, Any]:
+        """Diagnostic complet : patrimoine, disponibilité, santé, audits."""
+        report = Doctor(self).diagnose()
+        self.bus.publish("doctor.run", {"verdict": report["verdict"],
+                                        "issues": len(report["issues"])})
+        self._persist_events()
+        return report
 
     def _ingest_execution_traces(self, run: Dict[str, Any]) -> int:
         """Ingère les traces d'exécution dans Memory (11) via son interface publique.

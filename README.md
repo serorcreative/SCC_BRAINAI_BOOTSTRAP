@@ -92,6 +92,29 @@ tard par Learning. La boucle vécu → mémoire se referme aussi sur l'exécutio
 Chaque étape publie un événement sur l'Event Bus. Un composant absent n'arrête pas
 le démarrage : l'étape est signalée et BrainAI démarre en **mode dégradé**.
 
+## Diagnostic (`doctor`)
+
+Un diagnostic complet de toute la pile en une commande :
+
+```bash
+scc-brainai doctor
+```
+
+```
+BrainAI DOCTOR
+──────────────
+patrimoine    : 21/21 présents
+disponibilité : control_plane ✓  memory ✓  knowledge ✓  kernel ✓  reasoning ✓  planning ✓  decision ✓  execution ✓
+santé         : control plane = ok (15 domaines)
+audits        : memory ✓  reasoning ✓  planning ✓  decision ✓  execution ✓
+
+VERDICT : BrainAI HEALTHY
+```
+
+Il agrège, en lecture seule : le **patrimoine**, la **disponibilité** des composants,
+la **santé** du Control Plane et les **audits** des couches (Memory + Reasoning /
+Planning / Decision / Execution). Verdict `healthy` / `degraded` (code de sortie 0/1).
+
 ## Event Bus vivant (observabilité)
 
 Deux abonnés sont branchés **avant toute publication** :

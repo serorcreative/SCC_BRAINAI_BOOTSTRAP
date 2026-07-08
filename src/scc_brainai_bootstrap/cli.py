@@ -104,6 +104,29 @@ def cmd_execute(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    report = _boot(args).doctor()
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0 if report["verdict"] == "healthy" else 1
+    s = report["sections"]
+
+    def marks(d):
+        return "  ".join(f"{k} {'✓' if v else '✗'}" for k, v in d.items())
+    print("BrainAI DOCTOR")
+    print("──────────────")
+    print(f"patrimoine    : {s['patrimony']['present']}/{s['patrimony']['total']} présents"
+          + (f"  (manquants : {', '.join(s['patrimony']['missing'])})" if s['patrimony']['missing'] else ""))
+    print(f"disponibilité : {marks(s['availability'])}")
+    print(f"santé         : control plane = {s['health']['control_plane']} "
+          f"({s['health']['domains']} domaines)")
+    print(f"audits        : {marks(s['audits']) if s['audits'] else '(aucune donnée)'}")
+    for issue in report["issues"]:
+        print(f"  ⚠ {issue}")
+    print(f"\nVERDICT : {report['banner']}")
+    return 0 if report["verdict"] == "healthy" else 1
+
+
 def cmd_events(args) -> int:
     boot = _boot(args)
     path = boot.events_path
@@ -163,6 +186,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_exec.add_argument("id"); p_exec.add_argument("--by", required=True)
     p_exec.add_argument("--json", action="store_true")
     p_exec.set_defaults(func=cmd_execute)
+
+    p_doctor = sub.add_parser("doctor", help="Diagnostic complet de BrainAI.")
+    p_doctor.add_argument("--json", action="store_true")
+    p_doctor.set_defaults(func=cmd_doctor)
 
     p_events = sub.add_parser("events", help="Journal de l'Event Bus (observabilité).")
     p_events.add_argument("--topic", default=None, help="Filtrer par topic.")
