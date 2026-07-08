@@ -1,0 +1,20 @@
+{
+  "id": "brainai-decision",
+  "namespace": "brainai",
+  "name": "BrainAI Decision",
+  "role": "Décision gouvernée (15_BRAINAI_DECISION)",
+  "version": "1.0.0",
+  "description": "Formalise une décision candidate gouvernée ; exige une validation humaine.",
+  "capabilities": ["decision.evaluate", "decision.propose"],
+  "state": "active",
+  "autonomy": "act_with_validation",
+  "trust": "T3",
+  "permissions": ["decision.write"],
+  "dependencies": ["brainai-planning", "brainai-learning"],
+  "provider": "deterministic",
+  "vendor": "SCC",
+  "priority": 50,
+  "availability": "unknown",
+  "confidentiality": "internal",
+  "tags": ["cognitive", "engine"]
+}

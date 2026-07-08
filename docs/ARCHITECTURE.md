@@ -41,12 +41,16 @@ cognition    CognitiveStack (Reasoning / Planning / Decision / Execution câblé
              moteur Learning partagé injecté → boucle apprenante fermée)
 learning     LearningLayer (Learning branché sur la mémoire vivante → propositions)
 session      SessionStore (manifeste persistant : identité, démarrages, totaux d'activité)
-agents       AgentRegistry (premiers agents depuis le catalogue)
+registry/    Registre d'agents déclaratif & orienté capacités :
+               descriptor (données pures) · capability (slugs domaine.action) ·
+               sources (manifests JSON + adaptation des fiches) · registry (index,
+               gouvernance) · adapter (liaison paresseuse + CapabilityResolver)
 router       routage lexical déterministe (décision → decide ; sinon → Kernel)
 doctor       Doctor (diagnostic : patrimoine, disponibilité, santé, audits)
-bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/plan/validate/execute · learn · doctor · session)
-cli          scc-brainai (start / run / decide / plan / validate / execute / learn /
-             learnings / learn-validate / doctor / events / session / status)
+bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/plan/validate/execute · learn ·
+             agents_catalog/capability_index/resolve_capability · doctor · session)
+cli          scc-brainai (start / run / decide / plan / validate / execute / learn / learnings /
+             learn-validate / agents / capabilities / resolve / doctor / events / session / status)
 ```
 
 ## 4. Invariants tenus
@@ -58,8 +62,11 @@ cli          scc-brainai (start / run / decide / plan / validate / execute / lea
 | Aucun réseau / dépendance externe | stdlib pur |
 | Déterminisme | `as_of` figé + séquences + composants déterministes (prouvé cross-process) |
 | Traçabilité | chaque étape publie un événement sur l'Event Bus |
+| Découplage agents | `Bootstrap → Registry → Adapter → Agent` ; aucun import direct des moteurs |
+| Extensibilité | ajouter un agent = ajouter une description (manifeste), sans toucher le Bootstrap |
 
 ## 5. Prochaines incréments (backlog)
 
-- Étendre l'enregistrement d'agents au-delà des rôles pivots.
+- Mapper les capacités `domaine.action` sur les fiches SCC (au-delà des manifests BrainAI).
+- Métadonnées d'orchestration réelles (coût, latence, fiabilité) pour un routage multi-fournisseurs.
 - Exposer un mode « live » réseau (démon/service) une fois l'API réseau décidée (ADR).

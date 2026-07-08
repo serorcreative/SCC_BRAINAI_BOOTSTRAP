@@ -91,6 +91,11 @@ class BrainAIConfig:
     def agents_dir(self) -> Path:
         return self.scc_root / "00_SYSTEM" / "agents"
 
+    @property
+    def agents_registry_dir(self) -> Path:
+        """Descripteurs déclaratifs d'agents (manifests JSON versionnés)."""
+        return self.bootstrap_root / "registry" / "agents"
+
     # -- répertoires d'état du bootstrap -------------------------------- #
     @property
     def memory_data_dir(self) -> Path:

@@ -1,0 +1,20 @@
+{
+  "id": "brainai-learning",
+  "namespace": "brainai",
+  "name": "BrainAI Learning",
+  "role": "Apprentissage du vécu (12_BRAINAI_LEARNING)",
+  "version": "1.0.0",
+  "description": "Dérive des apprentissages propositionnels de la mémoire ; validation humaine.",
+  "capabilities": ["learning.analyze", "learning.recommend", "learning.validate"],
+  "state": "active",
+  "autonomy": "suggest",
+  "trust": "T3",
+  "permissions": ["memory.read", "learning.write"],
+  "dependencies": ["brainai-memory"],
+  "provider": "deterministic",
+  "vendor": "SCC",
+  "priority": 50,
+  "availability": "unknown",
+  "confidentiality": "internal",
+  "tags": ["cognitive", "engine"]
+}

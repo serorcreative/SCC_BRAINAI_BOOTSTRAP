@@ -1,0 +1,20 @@
+{
+  "id": "brainai-memory",
+  "namespace": "brainai",
+  "name": "BrainAI Memory",
+  "role": "Mémoire du vécu (11_BRAINAI_MEMORY)",
+  "version": "1.0.0",
+  "description": "Conserve et restitue l'expérience de BrainAI (événements, traces, sessions).",
+  "capabilities": ["memory.store", "memory.recall", "memory.audit"],
+  "state": "active",
+  "autonomy": "act_with_validation",
+  "trust": "T2",
+  "permissions": ["memory.read", "memory.write"],
+  "dependencies": [],
+  "provider": "deterministic",
+  "vendor": "SCC",
+  "priority": 50,
+  "availability": "unknown",
+  "confidentiality": "internal",
+  "tags": ["cognitive", "engine"]
+}

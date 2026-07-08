@@ -1,0 +1,20 @@
+{
+  "id": "brainai-execution",
+  "namespace": "brainai",
+  "name": "BrainAI Execution",
+  "role": "Exécution sous contrôle (16_BRAINAI_EXECUTION)",
+  "version": "1.0.0",
+  "description": "Prépare et exécute une décision validée, sous garde-fous, via le Runtime.",
+  "capabilities": ["execution.prepare", "execution.run"],
+  "state": "active",
+  "autonomy": "act_with_validation",
+  "trust": "T3",
+  "permissions": ["execution.run"],
+  "dependencies": ["brainai-decision"],
+  "provider": "deterministic",
+  "vendor": "SCC",
+  "priority": 50,
+  "availability": "unknown",
+  "confidentiality": "internal",
+  "tags": ["cognitive", "engine"]
+}

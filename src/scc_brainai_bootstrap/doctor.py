@@ -73,6 +73,10 @@ class Doctor:
                 audits["learning"] = bool(learn_eng.self_check().get("ok"))
             except Exception:  # noqa: BLE001
                 audits["learning"] = False
+        try:
+            audits["registry"] = bool(b.agents.audit().get("ok"))
+        except Exception:  # noqa: BLE001
+            audits["registry"] = False
         failed_audits = sorted(k for k, v in audits.items() if not v)
         if failed_audits:
             issues.append(f"audits KO : {', '.join(failed_audits)}")

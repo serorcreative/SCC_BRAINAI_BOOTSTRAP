@@ -1,0 +1,20 @@
+{
+  "id": "brainai-planning",
+  "namespace": "brainai",
+  "name": "BrainAI Planning",
+  "role": "Planification (14_BRAINAI_PLANNING)",
+  "version": "1.0.0",
+  "description": "Transforme un objectif en plan proposé ; intègre les apprentissages validés.",
+  "capabilities": ["planning.propose", "planning.decompose"],
+  "state": "active",
+  "autonomy": "suggest",
+  "trust": "T2",
+  "permissions": ["planning.write"],
+  "dependencies": ["brainai-learning"],
+  "provider": "deterministic",
+  "vendor": "SCC",
+  "priority": 50,
+  "availability": "unknown",
+  "confidentiality": "internal",
+  "tags": ["cognitive", "engine"]
+}

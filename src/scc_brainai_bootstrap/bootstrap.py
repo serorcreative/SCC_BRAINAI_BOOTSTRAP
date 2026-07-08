@@ -22,7 +22,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 import importlib
 
-from scc_brainai_bootstrap.agents import AgentRegistry
+from scc_brainai_bootstrap.registry import (
+    AdapterRegistry,
+    AgentRegistry,
+    CapabilityResolver,
+    FicheSource,
+    ManifestSource,
+)
 from scc_brainai_bootstrap.components import (
     ControlPlaneComponent,
     KernelComponent,
@@ -56,14 +62,37 @@ class BrainAIBootstrap:
         self.memory = MemoryComponent(self.config)
         self.knowledge = KnowledgeComponent(self.config)
         self.kernel = KernelComponent(self.config)
-        self.agents = AgentRegistry(self.config)
+        # Registre d'agents déclaratif (catalogue) alimenté par sources pluggables :
+        # manifests JSON locaux (agents BrainAI) + adaptation des fiches SCC existantes.
+        self.agents = AgentRegistry(self.config, sources=[
+            ManifestSource(self.config.agents_registry_dir, name="brainai"),
+            FicheSource(self.config.agents_dir, self.config.first_agents, namespace="scc"),
+        ])
         self.learning = LearningLayer(self.config)
         # La cognition reçoit un fournisseur du moteur Learning partagé : la boucle
         # apprenante est fermée (apprentissages validés → Planning / Decision).
         self.cognition = CognitiveStack(self.config, learning_provider=self._provide_learning_engine)
+        # Adaptateurs : liaison paresseuse capacité → implémentation. Le registre reste
+        # découplé ; les imports de moteurs vivent dans ces binders (jamais dans le registre).
+        self.adapters = AdapterRegistry()
+        self._register_adapters()
+        self.capability_resolver = CapabilityResolver(self.agents, self.adapters)
         self.session = SessionStore(self.config)
         self._session_state = None
         self._booted = False
+
+    def _register_adapters(self) -> None:
+        """Déclare les binders des moteurs cognitifs (Bootstrap → Registry → Adapter →
+        Agent). Chaque binder charge son moteur **à la demande**, jamais au démarrage."""
+        self.adapters.register("brainai-memory", self._bind_memory)
+        self.adapters.register("brainai-learning", self._provide_learning_engine)
+        self.adapters.register("brainai-planning", lambda: self.cognition.planning)
+        self.adapters.register("brainai-decision", lambda: self.cognition.decision)
+        self.adapters.register("brainai-execution", lambda: self.cognition.execution)
+
+    def _bind_memory(self):
+        self.memory.init()
+        return self.memory.store
 
     @property
     def events_path(self):
@@ -463,6 +492,37 @@ class BrainAIBootstrap:
         """État de la session persistée, **sans démarrer** BrainAI (lecture seule).
         Reflète la continuité entre invocations : identité, démarrages, totaux."""
         return self.session.summary()
+
+    # ================================================================== #
+    # Registre d'agents (orchestration : le Bootstrap ne connaît que des descriptions)
+    # ================================================================== #
+    def agents_catalog(self, namespace: str = None, capability: str = None) -> Dict[str, Any]:
+        """Catalogue déclaratif des agents (lecture seule). Filtrable par namespace ou
+        capacité. Le Bootstrap n'expose que des descriptions — aucune logique métier."""
+        self.agents.load()
+        items = self.agents.all()
+        if namespace:
+            items = [d for d in items if d.namespace == namespace]
+        if capability:
+            items = [d for d in items if d.provides(capability)]
+        return {"count": len(items), "agents": [d.to_dict() for d in items],
+                "counts": self.agents.counts(), "malformed": self.agents.malformed}
+
+    def capability_index(self) -> Dict[str, Any]:
+        """Index capacité → fournisseurs (many-to-many)."""
+        self.agents.load()
+        return {"capabilities": self.agents.capabilities(), "counts": self.agents.counts()}
+
+    def resolve_capability(self, capability: str) -> Dict[str, Any]:
+        """Résout une capacité vers le fournisseur retenu (liaison paresseuse). Démarre
+        BrainAI si besoin pour que les adaptateurs puissent se lier."""
+        if not self._booted:
+            self.run()
+        result = self.capability_resolver.resolve(capability)
+        self.bus.publish("capability.resolved",
+                         {"capability": capability, "selected": result["selected"]})
+        self._persist_events()
+        return result
 
     def _ingest_execution_traces(self, run: Dict[str, Any]) -> int:
         """Ingère les traces d'exécution dans Memory (11) via son interface publique.

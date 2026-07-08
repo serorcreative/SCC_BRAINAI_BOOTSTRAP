@@ -203,6 +203,51 @@ Il agrège, en lecture seule : le **patrimoine**, la **disponibilité** des comp
 la **santé** du Control Plane et les **audits** des couches (Memory + Reasoning /
 Planning / Decision / Execution / Learning). Verdict `healthy` / `degraded` (code de sortie 0/1).
 
+## Registre d'agents (déclaratif & orienté capacités)
+
+BrainAI connaît les agents disponibles via un **catalogue déclaratif** — il les **décrit**,
+il ne les implémente jamais. Le raisonnement de routage s'appuie sur les **capacités**
+(`domaine.action`), pas sur les noms. Découplage strict :
+
+```
+Bootstrap → Registry → Adapter → Agent
+```
+
+Le Bootstrap et le registre n'importent **aucun** moteur : l'implémentation n'est chargée
+que dans son **adaptateur**, à l'invocation d'une capacité.
+
+```bash
+scc-brainai agents                       # catalogue (moteurs BrainAI + fiches SCC)
+scc-brainai agents --namespace brainai
+scc-brainai capabilities                 # index capacité → fournisseur(s)
+scc-brainai resolve planning.propose     # capacité → fournisseur retenu (liaison paresseuse)
+```
+
+```
+CAPACITÉS (12)  — capacité → fournisseur(s)
+  memory.recall            → brainai-memory
+  planning.propose         → brainai-planning
+  ...
+```
+
+**Principes tenus :**
+
+- **Déclaratif** — un agent = une *description* (manifeste JSON `registry/agents/*.json`)
+  + un adaptateur *si* nécessaire. **Ajouter un agent ne modifie pas le Bootstrap.**
+- **Capacités d'abord** — l'index est *many-to-many* : une capacité peut avoir **plusieurs
+  fournisseurs** (ex. demain `vision.describe` → GPT / Gemini / Claude). Le `CapabilityResolver`
+  choisit par une **politique déterministe pilotée par les métadonnées** (priorité, fiabilité,
+  id) — **aucune règle spécifique à un fournisseur n'est codée en dur**.
+- **Métadonnées prévues** — `provider`, `vendor`, `cost`, `latency`, `priority`, `availability`,
+  `reliability`, `confidentiality`, `constraints` sont dans le schéma (facultatives), plus un sac
+  `extra` qui absorbe tout champ futur.
+- **Générique / écosystème** — le champ `namespace` fait cohabiter `brainai`, `scc`, et à terme
+  `domoo`, `transalyn`, `dreamforge`, `roadtrip`, `barry`… dans le même modèle.
+- **Sources pluggables** — manifests JSON (agents BrainAI) **+** adaptation lecture-seule des
+  fiches `00_SYSTEM/agents` (agents SCC). En ajouter une n'impacte ni le registre ni le Bootstrap.
+- **Gouverné & déterministe** — cycle de vie `proposed → active → deprecated → retired`
+  (transitions validées par un approbateur), ids dérivés du contenu, itérations triées.
+
 ## Continuité de session (mode « live »)
 
 Chaque commande démarre un processus neuf ; sans mémoire de session, ces invocations
@@ -259,6 +304,9 @@ alertes sont affichées directement par `start` / `run`.
   d'abonnement pour les couches supérieures (distinct du journal de jobs du Runtime).
 - **Session Store** (`session.py`) — manifeste de session persistant (identité stable,
   compteur de démarrages, totaux d'activité) : la continuité entre invocations.
+- **Registre d'agents** (`registry/`) — catalogue déclaratif orienté capacités (descripteur,
+  sources pluggables, index par capacité, adaptateurs à liaison paresseuse, resolver) :
+  `Bootstrap → Registry → Adapter → Agent`, sans import direct des moteurs.
 
 ## Utilisation (Python)
 
@@ -272,7 +320,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 114 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 159 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

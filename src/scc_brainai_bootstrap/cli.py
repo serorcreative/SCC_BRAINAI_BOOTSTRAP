@@ -230,6 +230,49 @@ def cmd_session(args) -> int:
     return 0
 
 
+def cmd_agents(args) -> int:
+    result = _boot(args).agents_catalog(namespace=args.namespace, capability=args.capability)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    c = result["counts"]
+    print(f"AGENTS ({result['count']}/{c['agents']})  "
+          f"namespaces={c['namespaces']}  capacités={c['capabilities']}")
+    for d in result["agents"]:
+        print(f"  [{d['state']:<9}] {d['namespace']}/{d['id']:<18} {d['name']}")
+        print(f"      capacités : {', '.join(d['capabilities']) or '—'}")
+    if result["malformed"]:
+        print(f"  ⚠ capacités mal formées : {result['malformed']}")
+    return 0
+
+
+def cmd_capabilities(args) -> int:
+    result = _boot(args).capability_index()
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    caps = result["capabilities"]
+    print(f"CAPACITÉS ({len(caps)})  — capacité → fournisseur(s)")
+    for cap, ids in caps.items():
+        print(f"  {cap:<24} → {', '.join(ids)}")
+    return 0
+
+
+def cmd_resolve(args) -> int:
+    result = _boot(args).resolve_capability(args.capability)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["resolved"] else 1
+    print(f"capacité    : {result['capability']}")
+    print(f"fournisseurs: {result['provider_count']}")
+    for c in result["candidates"]:
+        mark = "●" if c["id"] == result["selected"] else ("○" if c["available"] else "×")
+        print(f"  {mark} {c['id']:<18} priorité {c['priority']}  "
+              f"{'disponible' if c['available'] else 'indisponible'}")
+    print(f"retenu      : {result['selected'] or '(aucun fournisseur disponible)'}")
+    return 0 if result["resolved"] else 1
+
+
 def cmd_status(args) -> int:
     boot = _boot(args)
     print(json.dumps({
@@ -311,6 +354,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_events = sub.add_parser("events", help="Journal de l'Event Bus (observabilité).")
     p_events.add_argument("--topic", default=None, help="Filtrer par topic.")
     p_events.set_defaults(func=cmd_events)
+
+    p_agents = sub.add_parser("agents", help="Catalogue déclaratif des agents (registre).")
+    p_agents.add_argument("--namespace", default=None, help="Filtrer par namespace (brainai, scc, …).")
+    p_agents.add_argument("--capability", default=None, help="Filtrer par capacité (domaine.action).")
+    p_agents.add_argument("--json", action="store_true")
+    p_agents.set_defaults(func=cmd_agents)
+
+    p_caps = sub.add_parser("capabilities", help="Index capacité → fournisseur(s).")
+    p_caps.add_argument("--json", action="store_true")
+    p_caps.set_defaults(func=cmd_capabilities)
+
+    p_resolve = sub.add_parser("resolve", help="Résoudre une capacité vers un fournisseur.")
+    p_resolve.add_argument("capability")
+    p_resolve.add_argument("--json", action="store_true")
+    p_resolve.set_defaults(func=cmd_resolve)
 
     p_session = sub.add_parser("session", help="État de la session persistée (continuité, sans démarrer).")
     p_session.add_argument("--json", action="store_true")
