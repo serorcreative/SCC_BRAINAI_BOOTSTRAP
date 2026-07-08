@@ -27,18 +27,28 @@ scc-brainai start
 BrainAI READY
 ```
 
-## Traiter une demande de bout en bout
+## Un seul point d'entrée : `run` (routage automatique)
+
+`run` est **le** point d'entrée de BrainAI. Il démarre la pile si besoin puis
+**route automatiquement** la demande :
+
+- demande **décisionnelle** (« faut-il… », « choisir… », « X ou Y »…) →
+  boucle `decide` (décision candidate gouvernée, en attente de validation humaine) ;
+- **sinon** → **Kernel (10)** puis **mémorisation dans Memory (11)** — la boucle
+  vécu → mémoire.
 
 ```bash
-scc-brainai run "Quelles doctrines gouvernent la gouvernance ?"
+scc-brainai run "Quelles doctrines gouvernent la gouvernance ?"   # → Kernel
+scc-brainai run "Faut-il publier l API maintenant ou différer ?"  # → decide
 scc-brainai run "analyse l architecture" --deep     # passe cognitive complète (5 moteurs)
+scc-brainai run "..." --route decide                # forcer la route
 scc-brainai run "..." --no-record --json            # sans mémorisation ; sortie JSON
 ```
 
-`run` démarre BrainAI si besoin, délègue la demande au **Kernel (10)**, puis
-**mémorise l'expérience dans Memory (11)** — la boucle vécu → mémoire :
+Une demande informative est routée vers le Kernel :
 
 ```
+route       : kernel
 intention   : governance
 agents      : SCC-AGENT-0002, SCC-AGENT-0003, SCC-AGENT-0001, SCC-AGENT-0020
 gouvernance : 13 doctrine(s), 5 ADR
@@ -48,6 +58,26 @@ mémorisé    : trace mem_000000000008 (7 événements)
 --- synthèse ---
 (cognition déterministe de BrainAI, sans IA externe)
 ```
+
+Une demande décisionnelle est routée vers la boucle `decide` :
+
+```
+route       : decide
+décision    : dec_b863911cb793  (statut : proposed)
+retenue     : Différer  (classe : routine)
+options     :
+  ● Différer (score 0.52)
+  ○ Statu quo (score 0.52)
+  ○ Agir maintenant (score 0.49)
+validation humaine requise avant exécution :
+  - Validation humaine explicite par un approbateur identifié.
+
+→ valider : scc-brainai validate dec_b863911cb793 --by <acteur>
+```
+
+Le routage est **lexical et déterministe** (`router.py`) ; il peut être forcé par
+`--route auto|kernel|decide`. La commande `decide` reste disponible comme raccourci
+explicite vers la boucle décisionnelle.
 
 ## La grande boucle cognitive (décider → valider → exécuter)
 
@@ -152,7 +182,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 17 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 77 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

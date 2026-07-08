@@ -34,6 +34,7 @@ from scc_brainai_bootstrap.cognition import CognitiveStack
 from scc_brainai_bootstrap.doctor import Doctor
 from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
+from scc_brainai_bootstrap import router
 from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
 
 READY_BANNER = "BrainAI READY"
@@ -265,6 +266,29 @@ class BrainAIBootstrap:
                       for s in done["steps"]],
             "memory_ingested": ingested,
         }
+
+    # ================================================================== #
+    # Point d'entrée unique : routage automatique
+    # ================================================================== #
+    def run_query(self, query: str, route: str = "auto", deep: bool = False,
+                  record: bool = True, urgency: float = 0.3) -> Dict[str, Any]:
+        """Point d'entrée unique. **Route automatiquement** la demande :
+
+        * demande décisionnelle (« faut-il… », « choisir… », « X ou Y »…) →
+          boucle cognitive :meth:`decide` (décision candidate gouvernée) ;
+        * sinon → :meth:`handle` (Kernel + mémorisation de l'expérience).
+
+        Le routage peut être forcé (``route="decide"`` / ``"kernel"``). Aucune
+        couche n'est modifiée : le routeur est purement lexical et déterministe.
+        """
+        chosen = router.route(query, forced=route if route in ("decide", "kernel") else None)
+        self.bus.publish("run.routed", {"route": chosen, "query": query})
+        if chosen == "decide":
+            result = self.decide(query, urgency=urgency)
+        else:
+            result = self.handle(query, deep=deep, record=record)
+        result["route"] = chosen
+        return result
 
     # ================================================================== #
     # Diagnostic complet

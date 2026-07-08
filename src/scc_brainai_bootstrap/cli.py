@@ -1,7 +1,7 @@
 """CLI de démarrage de BrainAI (``scc-brainai``).
 
 ``start``  exécute la séquence de démarrage et affiche « BrainAI READY ».
-``run``    traite une demande de bout en bout (bootstrap → Kernel → Memory).
+``run``    point d'entrée unique : route auto (décision → decide ; sinon Kernel).
 ``status`` affiche le patrimoine et l'état des sous-systèmes (sans démarrer).
 """
 
@@ -47,13 +47,18 @@ def _print_alerts(alerts) -> None:
 
 def cmd_run(args) -> int:
     boot = _boot(args)
-    result = boot.handle(args.query, deep=bool(args.deep), record=not args.no_record)
+    result = boot.run_query(args.query, route=args.route,
+                            deep=bool(args.deep), record=not args.no_record,
+                            urgency=float(args.urgency))
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
     if not result.get("ok"):
         print(f"✗ {result.get('error', 'échec')}")
         return 1
+    print(f"route       : {result['route']}")
+    if result["route"] == "decide":
+        return _print_decision(result)
     print(f"intention   : {result['intent']}")
     print(f"agents      : {', '.join(result['agents'])}")
     print(f"gouvernance : {result['governance']['doctrines']} doctrine(s), "
@@ -68,11 +73,7 @@ def cmd_run(args) -> int:
     return 0
 
 
-def cmd_decide(args) -> int:
-    result = _boot(args).decide(args.question, urgency=float(args.urgency))
-    if args.json or not result.get("ok"):
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result.get("ok") else 1
+def _print_decision(result) -> int:
     print(f"décision    : {result['decision_id']}  (statut : {result['status']})")
     print(f"retenue     : {result['selected']}  (classe : {result['class']})")
     print("options     :")
@@ -83,6 +84,14 @@ def cmd_decide(args) -> int:
         print(f"  - {c}")
     print(f"\n→ valider : scc-brainai validate {result['decision_id']} --by <acteur>")
     return 0
+
+
+def cmd_decide(args) -> int:
+    result = _boot(args).decide(args.question, urgency=float(args.urgency))
+    if args.json or not result.get("ok"):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
+    return _print_decision(result)
 
 
 def cmd_validate(args) -> int:
@@ -165,10 +174,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_start.add_argument("--json", action="store_true", help="Sortie JSON du rapport de démarrage.")
     p_start.set_defaults(func=cmd_start)
 
-    p_run = sub.add_parser("run", help="Traiter une demande de bout en bout (Kernel + Memory).")
+    p_run = sub.add_parser("run", help="Point d'entrée unique : route auto (décision → decide ; sinon Kernel).")
     p_run.add_argument("query")
-    p_run.add_argument("--deep", action="store_true", help="Passe cognitive complète (5 moteurs).")
-    p_run.add_argument("--no-record", action="store_true", help="Ne pas mémoriser l'expérience.")
+    p_run.add_argument("--route", choices=["auto", "kernel", "decide"], default="auto",
+                       help="Forcer la route (défaut : auto).")
+    p_run.add_argument("--deep", action="store_true", help="Passe cognitive complète (5 moteurs, route Kernel).")
+    p_run.add_argument("--no-record", action="store_true", help="Ne pas mémoriser l'expérience (route Kernel).")
+    p_run.add_argument("--urgency", default="0.3", help="Urgence de la décision (route decide).")
     p_run.add_argument("--json", action="store_true", help="Sortie JSON complète.")
     p_run.set_defaults(func=cmd_run)
 

@@ -34,11 +34,15 @@ et l'**Event Bus**.
 ```
 core/        config (as_of, premiers agents) · errors · clock (digest)
 event_bus    EventBus (publish/subscribe, append-only, déterministe)
+subscribers  EventRecorder (journal JSONL) · LifecycleWatcher (alertes)
 patrimony    PatrimonyManager (inventaire du patrimoine, lecture seule)
-components   adaptateurs Control Plane / Memory / Knowledge (bootstrap dynamique)
+components   adaptateurs Control Plane / Memory / Knowledge / Kernel (bootstrap dynamique)
+cognition    CognitiveStack (Reasoning / Planning / Decision / Execution câblés)
 agents       AgentRegistry (premiers agents depuis le catalogue)
-bootstrap    BrainAIBootstrap (séquence des 8 étapes)
-cli          scc-brainai (start / status)
+router       routage lexical déterministe (décision → decide ; sinon → Kernel)
+doctor       Doctor (diagnostic : patrimoine, disponibilité, santé, audits)
+bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/validate/execute · doctor)
+cli          scc-brainai (start / run / decide / validate / execute / doctor / events / status)
 ```
 
 ## 4. Invariants tenus
