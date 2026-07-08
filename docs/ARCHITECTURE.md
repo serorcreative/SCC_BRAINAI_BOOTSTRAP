@@ -40,12 +40,13 @@ components   adaptateurs Control Plane / Memory / Knowledge / Kernel (bootstrap 
 cognition    CognitiveStack (Reasoning / Planning / Decision / Execution câblés ;
              moteur Learning partagé injecté → boucle apprenante fermée)
 learning     LearningLayer (Learning branché sur la mémoire vivante → propositions)
+session      SessionStore (manifeste persistant : identité, démarrages, totaux d'activité)
 agents       AgentRegistry (premiers agents depuis le catalogue)
 router       routage lexical déterministe (décision → decide ; sinon → Kernel)
 doctor       Doctor (diagnostic : patrimoine, disponibilité, santé, audits)
-bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/plan/validate/execute · learn · doctor)
+bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/plan/validate/execute · learn · doctor · session)
 cli          scc-brainai (start / run / decide / plan / validate / execute / learn /
-             learnings / learn-validate / doctor / events / status)
+             learnings / learn-validate / doctor / events / session / status)
 ```
 
 ## 4. Invariants tenus
@@ -61,5 +62,4 @@ cli          scc-brainai (start / run / decide / plan / validate / execute / lea
 ## 5. Prochaines incréments (backlog)
 
 - Étendre l'enregistrement d'agents au-delà des rôles pivots.
-- Continuité de session : persistance de l'état de démarrage entre invocations.
-- Exposer un mode « live » (démarrage persistant) une fois l'API réseau décidée (ADR).
+- Exposer un mode « live » réseau (démon/service) une fois l'API réseau décidée (ADR).

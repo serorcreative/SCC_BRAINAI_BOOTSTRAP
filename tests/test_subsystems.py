@@ -49,8 +49,23 @@ def test_degraded_mode_when_component_missing(tmp_path):
 
 def test_deterministic_boot(config):
     from scc_brainai_bootstrap.bootstrap import BrainAIBootstrap
+    import copy
     import json
-    a = BrainAIBootstrap(config=config).run()
-    b = BrainAIBootstrap(config=config).run()
+    # déterminisme = même entrée + même état initial → même sortie : deux états neufs.
+    cfg_a = copy.copy(config); cfg_a.data_dir = config.data_dir.parent / "boot_a"
+    cfg_b = copy.copy(config); cfg_b.data_dir = config.data_dir.parent / "boot_b"
+    a = BrainAIBootstrap(config=cfg_a).run()
+    b = BrainAIBootstrap(config=cfg_b).run()
+    # le chemin du journal reflète le data_dir (non déterministe par nature) : exclu.
+    a["subscribers"].pop("events_file"); b["subscribers"].pop("events_file")
     assert json.dumps(a, sort_keys=True, ensure_ascii=False) == \
            json.dumps(b, sort_keys=True, ensure_ascii=False)
+
+
+def test_boot_count_continues_across_restarts(config):
+    from scc_brainai_bootstrap.bootstrap import BrainAIBootstrap
+    r1 = BrainAIBootstrap(config=config).run()
+    r2 = BrainAIBootstrap(config=config).run()      # même data_dir : la session continue
+    assert r1["session"]["boots"] == 1
+    assert r2["session"]["boots"] == 2
+    assert r1["session"]["session_id"] == r2["session"]["session_id"]

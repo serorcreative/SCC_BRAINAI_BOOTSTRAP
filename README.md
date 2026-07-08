@@ -25,6 +25,7 @@ scc-brainai start
 [7/8] agents          ✓ 4 agent(s) enregistré(s)
 
 BrainAI READY
+session       : ses_f868104ff8de · démarrage n°1
 ```
 
 ## Un seul point d'entrée : `run` (routage automatique)
@@ -202,6 +203,36 @@ Il agrège, en lecture seule : le **patrimoine**, la **disponibilité** des comp
 la **santé** du Control Plane et les **audits** des couches (Memory + Reasoning /
 Planning / Decision / Execution / Learning). Verdict `healthy` / `degraded` (code de sortie 0/1).
 
+## Continuité de session (mode « live »)
+
+Chaque commande démarre un processus neuf ; sans mémoire de session, ces invocations
+seraient des one-shots isolés. BrainAI persiste un **manifeste de session**
+(`data/session.json`) qui **survit aux redémarrages** : identité stable, **compteur de
+démarrages** et **totaux d'activité cumulés**. Les invocations successives forment une
+**session continue**.
+
+```bash
+scc-brainai session        # lecture seule — n'incrémente rien, ne démarre pas
+```
+
+```
+BrainAI SESSION
+───────────────
+session_id    : ses_f868104ff8de
+ouverte le    : 2026-07-06T00:00:00+00:00  (as_of figé)
+démarrages    : 4
+dernier état  : BrainAI READY
+activité cumulée :
+  runs                 2
+  learn_runs           1
+  ...
+```
+
+`start` / `run` affichent la ligne de session (`ses_… · démarrage n°N`). L'identité de
+session est **dérivée du contenu** (jamais de l'horloge) et le compteur découle de l'état
+persisté : la continuité est **déterministe**, sans horloge murale. Deux états neufs
+identiques produisent la même session ; un même dossier `data/` poursuit la sienne.
+
 ## Event Bus vivant (observabilité)
 
 Deux abonnés sont branchés **avant toute publication** :
@@ -226,6 +257,8 @@ alertes sont affichées directement par `start` / `run`.
   BrainAI est fait (moteurs, Runtime, API, Control Plane, couches BrainAI, catalogues).
 - **Event Bus** (`event_bus.py`) — bus léger du cycle de vie de BrainAI, point
   d'abonnement pour les couches supérieures (distinct du journal de jobs du Runtime).
+- **Session Store** (`session.py`) — manifeste de session persistant (identité stable,
+  compteur de démarrages, totaux d'activité) : la continuité entre invocations.
 
 ## Utilisation (Python)
 
@@ -239,7 +272,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 103 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 114 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

@@ -36,6 +36,7 @@ from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.learning import LearningLayer
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
 from scc_brainai_bootstrap import router
+from scc_brainai_bootstrap.session import SessionStore
 from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
 
 READY_BANNER = "BrainAI READY"
@@ -60,6 +61,8 @@ class BrainAIBootstrap:
         # La cognition reçoit un fournisseur du moteur Learning partagé : la boucle
         # apprenante est fermée (apprentissages validés → Planning / Decision).
         self.cognition = CognitiveStack(self.config, learning_provider=self._provide_learning_engine)
+        self.session = SessionStore(self.config)
+        self._session_state = None
         self._booted = False
 
     @property
@@ -123,15 +126,22 @@ class BrainAIBootstrap:
         degraded = [s["name"] for s in steps if not s["ok"]]
         ready = all(s["ok"] for s in steps if s["name"] in mandatory)
         overall = ready and not degraded
-        self.bus.publish("brainai.ready", {"ready": overall, "degraded": degraded})
-
         banner = READY_BANNER if overall else f"{READY_BANNER} (DÉGRADÉ : {', '.join(degraded)})"
+
+        # Continuité de session : poursuivre (ou ouvrir) la session persistée, avant de
+        # déclarer READY — qui reste l'événement **terminal** du démarrage.
+        self._session_state = self.session.record_boot({
+            "ready": overall, "banner": banner, "steps": steps,
+            "agents": self.agents.to_list(), "patrimony": pat})
+        self.bus.publish("session.continued",
+                         {"session_id": self._session_state["session_id"],
+                          "boots": self._session_state["boots"]})
+        self.bus.publish("brainai.ready", {"ready": overall, "degraded": degraded})
         if on_step:
             on_step({"n": 8, "name": "ready", "ok": overall, "detail": banner, "data": {}})
 
         self._booted = True
-        self._persist_events()
-        return {
+        report = {
             "as_of": self.config.as_of,
             "ready": overall,
             "banner": banner,
@@ -141,12 +151,20 @@ class BrainAIBootstrap:
             "agents": self.agents.to_list(),
             "events": self.bus.events,
             "event_count": len(self.bus),
+            "session": {
+                "session_id": self._session_state["session_id"],
+                "boots": self._session_state["boots"],
+                "created_as_of": self._session_state["created_as_of"],
+                "totals": dict(self._session_state["totals"]),
+            },
             "subscribers": {
                 "recorded": len(self.recorder),
                 "events_file": str(self.events_path),
                 "lifecycle": self.watcher.summary(),
             },
         }
+        self._persist_events()
+        return report
 
     # ================================================================== #
     # Cycle de bout en bout : bootstrap -> Kernel -> (Memory)
@@ -181,6 +199,7 @@ class BrainAIBootstrap:
             except Exception as exc:  # noqa: BLE001 - enregistrement best-effort
                 self.bus.publish("experience.record_failed", {"detail": str(exc)})
 
+        self.session.note("runs")
         self._persist_events()
         return {
             "ok": bool(response.get("ok")),
@@ -206,6 +225,8 @@ class BrainAIBootstrap:
 
         La décision produite est **proposée** : elle exige une validation humaine
         avant toute exécution. Aucune couche n'est modifiée."""
+        if not self._booted:
+            self.run()
         self.config.ensure_directories()
         if not self.cognition.available():
             return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
@@ -217,6 +238,7 @@ class BrainAIBootstrap:
         self.bus.publish("decision.proposed",
                          {"decision_id": rec["id"], "subject": question,
                           "learnings": len(learning_ids)})
+        self.session.note("decisions")
         self._persist_events()
         selected = next((o for o in rec["options"] if o["id"] == rec["selected_id"]), {})
         return {
@@ -249,6 +271,8 @@ class BrainAIBootstrap:
     def execute_decision(self, decision_id: str, actor: str) -> Dict[str, Any]:
         """Prépare et exécute une décision **validée** (Execution -> Runtime), sous
         garde-fous. Aucune exécution sans manifeste validé ni acteur autorisé."""
+        if not self._booted:
+            self.run()
         if not self.cognition.available():
             return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
         run = self.cognition.execution.prepare(decision_id, actor=actor)
@@ -264,6 +288,8 @@ class BrainAIBootstrap:
         ingested = self._ingest_execution_traces(done)
         if ingested:
             self.bus.publish("execution.memorized", {"run_id": done["id"], "traces": ingested})
+        if done["status"] == "succeeded":
+            self.session.note("executions")
         self._persist_events()
         return {
             "ok": done["status"] == "succeeded",
@@ -293,6 +319,7 @@ class BrainAIBootstrap:
         self.bus.publish("plan.created",
                          {"planset_id": ps["id"], "tasks": len(ps["tasks"]),
                           "from_learning": len(learning_tasks)})
+        self.session.note("plans")
         self._persist_events()
         return {
             "ok": True,
@@ -345,6 +372,7 @@ class BrainAIBootstrap:
         self.bus.publish("learning.analyzed",
                          {"entries": result["analyzed_entries"],
                           "total": result["total_learnings"]})
+        self.session.note("learn_runs")
         self._persist_events()
         recommendations = [
             {"id": it["id"], "title": it["title"],
@@ -389,6 +417,8 @@ class BrainAIBootstrap:
         topic = {"validate": "learning.validated", "reject": "learning.rejected",
                  "revoke": "learning.revoked"}[action]
         self.bus.publish(topic, {"item_id": item_id, "by": approver})
+        if action == "validate":
+            self.session.note("learnings_validated")
         self._persist_events()
         return {"ok": True, "item_id": item_id, "status": it["status"]}
 
@@ -425,6 +455,14 @@ class BrainAIBootstrap:
                                         "issues": len(report["issues"])})
         self._persist_events()
         return report
+
+    # ================================================================== #
+    # Continuité de session (mode « live »)
+    # ================================================================== #
+    def session_summary(self) -> Dict[str, Any]:
+        """État de la session persistée, **sans démarrer** BrainAI (lecture seule).
+        Reflète la continuité entre invocations : identité, démarrages, totaux."""
+        return self.session.summary()
 
     def _ingest_execution_traces(self, run: Dict[str, Any]) -> int:
         """Ingère les traces d'exécution dans Memory (11) via son interface publique.

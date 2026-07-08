@@ -36,6 +36,8 @@ def cmd_start(args) -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         _print_alerts(report.get("subscribers", {}).get("lifecycle", {}).get("alerts", []))
+        sess = report.get("session", {})
+        print(f"session       : {sess.get('session_id')} · démarrage n°{sess.get('boots')}")
         print(f"(event bus : {report['subscribers']['recorded']} événements journalisés)")
     return 0 if report["ready"] else 1
 
@@ -207,6 +209,27 @@ def cmd_events(args) -> int:
     return 0
 
 
+def cmd_session(args) -> int:
+    summary = _boot(args).session_summary()
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+    if not summary.get("exists"):
+        print("session : aucune (BrainAI n'a pas encore démarré ici)")
+        return 0
+    print("BrainAI SESSION")
+    print("───────────────")
+    print(f"session_id    : {summary['session_id']}")
+    print(f"ouverte le    : {summary['created_as_of']}  (as_of figé)")
+    print(f"démarrages    : {summary['boots']}")
+    print(f"dernier état  : {summary.get('last_banner')}")
+    print(f"agents        : {', '.join(summary.get('agents', []))}")
+    print("activité cumulée :")
+    for k, v in summary.get("totals", {}).items():
+        print(f"  {k:<20} {v}")
+    return 0
+
+
 def cmd_status(args) -> int:
     boot = _boot(args)
     print(json.dumps({
@@ -288,6 +311,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_events = sub.add_parser("events", help="Journal de l'Event Bus (observabilité).")
     p_events.add_argument("--topic", default=None, help="Filtrer par topic.")
     p_events.set_defaults(func=cmd_events)
+
+    p_session = sub.add_parser("session", help="État de la session persistée (continuité, sans démarrer).")
+    p_session.add_argument("--json", action="store_true")
+    p_session.set_defaults(func=cmd_session)
 
     sub.add_parser("status", help="Patrimoine et disponibilité des sous-systèmes.").set_defaults(func=cmd_status)
     return parser
