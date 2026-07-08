@@ -543,6 +543,34 @@ class BrainAIBootstrap:
             return {"count": len(items), "items": top}
         return {"proposed": summarize("proposed"), "validated": summarize("validated")}
 
+    def status_summary(self) -> Dict[str, Any]:
+        """Patrimoine et disponibilité des sous-systèmes (lecture seule, sans démarrer)."""
+        return {
+            "patrimony": self.patrimony.summary(),
+            "first_agents": list(self.config.first_agents),
+            "components_src": {
+                "control_plane": self.config.control_plane_src.exists(),
+                "memory": self.config.memory_src.exists(),
+                "knowledge": self.config.knowledge_src.exists(),
+                "agents_catalog": self.config.agents_dir.exists(),
+            },
+        }
+
+    def journal(self, topic: str = None) -> Dict[str, Any]:
+        """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
+        path = self.events_path
+        if path.exists():
+            try:
+                events = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()
+                          if l.strip()]
+            except Exception:  # noqa: BLE001
+                events = []
+        else:
+            events = list(self.recorder.events)
+        if topic:
+            events = [e for e in events if e.get("topic") == topic]
+        return {"count": len(events), "events": events}
+
     def _read_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Derniers événements du journal persistant (lecture seule)."""
         path = self.events_path

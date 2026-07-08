@@ -1,8 +1,8 @@
-"""CLI de démarrage de BrainAI (``scc-brainai``).
+"""CLI de BrainAI (``scc-brainai``) — **première interface** de la Presentation Layer.
 
-``start``  exécute la séquence de démarrage et affiche « BrainAI READY ».
-``run``    point d'entrée unique : route auto (décision → decide ; sinon Kernel).
-``status`` affiche le patrimoine et l'état des sous-systèmes (sans démarrer).
+Le CLI ne parle **jamais** directement aux moteurs internes : il consomme exclusivement
+la couche de présentation (``Presentation``), démontrant la frontière unique cerveau ↔
+interfaces. Chaque commande appelle une opération du contrat et n'affiche que son ``data``.
 """
 
 from __future__ import annotations
@@ -13,16 +13,16 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from scc_brainai_bootstrap import __version__
-from scc_brainai_bootstrap.bootstrap import BrainAIBootstrap
 from scc_brainai_bootstrap.core.config import load_config
+from scc_brainai_bootstrap.presentation import Presentation
 
 
-def _boot(args) -> BrainAIBootstrap:
-    return BrainAIBootstrap(config=load_config(args.config))
+def _present(args) -> Presentation:
+    return Presentation(config=load_config(args.config))
 
 
 def cmd_start(args) -> int:
-    boot = _boot(args)
+    present = _present(args)
 
     def printer(step):
         if step["name"] == "ready":
@@ -31,7 +31,7 @@ def cmd_start(args) -> int:
             mark = "✓" if step["ok"] else "✗"
             print(f"[{step['n']}/8] {step['name']:<15} {mark} {step['detail']}")
 
-    report = boot.run(on_step=None if args.json else printer)
+    report = present.start(on_step=None if args.json else printer)["data"]
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
@@ -48,10 +48,9 @@ def _print_alerts(alerts) -> None:
 
 
 def cmd_run(args) -> int:
-    boot = _boot(args)
-    result = boot.run_query(args.query, route=args.route,
-                            deep=bool(args.deep), record=not args.no_record,
-                            urgency=float(args.urgency))
+    result = _present(args).run(args.query, route=args.route,
+                                deep=bool(args.deep), record=not args.no_record,
+                                urgency=float(args.urgency))["data"]
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
@@ -89,7 +88,7 @@ def _print_decision(result) -> int:
 
 
 def cmd_decide(args) -> int:
-    result = _boot(args).decide(args.question, urgency=float(args.urgency))
+    result = _present(args).decide(args.question, urgency=float(args.urgency))["data"]
     if args.json or not result.get("ok"):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
@@ -97,7 +96,7 @@ def cmd_decide(args) -> int:
 
 
 def cmd_plan(args) -> int:
-    result = _boot(args).plan(args.objective)
+    result = _present(args).plan(args.objective)["data"]
     if args.json or not result.get("ok"):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
@@ -116,13 +115,13 @@ def cmd_plan(args) -> int:
 
 
 def cmd_validate(args) -> int:
-    result = _boot(args).validate_decision(args.id, args.by, args.reason)
+    result = _present(args).validate_decision(args.id, args.by, args.reason)["data"]
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok") else 1
 
 
 def cmd_execute(args) -> int:
-    result = _boot(args).execute_decision(args.id, actor=args.by)
+    result = _present(args).execute_decision(args.id, actor=args.by)["data"]
     if args.json or not result.get("ok"):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
@@ -135,7 +134,7 @@ def cmd_execute(args) -> int:
 
 
 def cmd_learn(args) -> int:
-    result = _boot(args).learn()
+    result = _present(args).learn()["data"]
     if args.json or not result.get("ok"):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
@@ -155,7 +154,7 @@ def cmd_learn(args) -> int:
 
 
 def cmd_learnings(args) -> int:
-    result = _boot(args).learnings(kind=args.kind, status=args.status)
+    result = _present(args).learnings(kind=args.kind, status=args.status)["data"]
     if args.json or not result.get("ok"):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
@@ -168,13 +167,13 @@ def cmd_learnings(args) -> int:
 
 
 def cmd_learn_validate(args) -> int:
-    result = _boot(args).validate_learning(args.id, args.by, args.reason, action=args.action)
+    result = _present(args).validate_learning(args.id, args.by, args.reason, action=args.action)["data"]
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok") else 1
 
 
 def cmd_doctor(args) -> int:
-    report = _boot(args).doctor()
+    report = _present(args).doctor()["data"]
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if report["verdict"] == "healthy" else 1
@@ -197,20 +196,16 @@ def cmd_doctor(args) -> int:
 
 
 def cmd_events(args) -> int:
-    boot = _boot(args)
-    path = boot.events_path
-    if not path.exists():
-        boot.run()               # démarre pour peupler le journal du bus
-    events = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()] \
-        if path.exists() else boot.recorder.events
-    if args.topic:
-        events = [e for e in events if e["topic"] == args.topic]
-    print(json.dumps({"count": len(events), "events": events}, ensure_ascii=False, indent=2))
+    present = _present(args)
+    if not present.journal_exists():
+        present.start()          # démarre pour peupler le journal du bus
+    data = present.events(topic=args.topic)["data"]
+    print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_session(args) -> int:
-    summary = _boot(args).session_summary()
+    summary = _present(args).session()["data"]
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
@@ -231,7 +226,7 @@ def cmd_session(args) -> int:
 
 
 def cmd_agents(args) -> int:
-    result = _boot(args).agents_catalog(namespace=args.namespace, capability=args.capability)
+    result = _present(args).agents(namespace=args.namespace, capability=args.capability)["data"]
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
@@ -247,7 +242,7 @@ def cmd_agents(args) -> int:
 
 
 def cmd_capabilities(args) -> int:
-    result = _boot(args).capability_index()
+    result = _present(args).capabilities()["data"]
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
@@ -259,7 +254,7 @@ def cmd_capabilities(args) -> int:
 
 
 def cmd_resolve(args) -> int:
-    result = _boot(args).resolve_capability(args.capability)
+    result = _present(args).resolve(args.capability)["data"]
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["resolved"] else 1
@@ -274,7 +269,7 @@ def cmd_resolve(args) -> int:
 
 
 def cmd_overview(args) -> int:
-    ov = _boot(args).overview()
+    ov = _present(args).overview()["data"]
     if args.json:
         print(json.dumps(ov, ensure_ascii=False, indent=2))
         return 0
@@ -303,17 +298,20 @@ def cmd_overview(args) -> int:
 
 
 def cmd_status(args) -> int:
-    boot = _boot(args)
-    print(json.dumps({
-        "patrimony": boot.patrimony.summary(),
-        "first_agents": boot.config.first_agents,
-        "components_src": {
-            "control_plane": boot.config.control_plane_src.exists(),
-            "memory": boot.config.memory_src.exists(),
-            "knowledge": boot.config.knowledge_src.exists(),
-            "agents_catalog": boot.config.agents_dir.exists(),
-        },
-    }, ensure_ascii=False, indent=2))
+    result = _present(args).status()["data"]
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_contract(args) -> int:
+    present = _present(args)
+    desc = present.describe()
+    if args.json:
+        print(json.dumps(desc, ensure_ascii=False, indent=2))
+        return 0
+    print(f"CONTRAT DE PRÉSENTATION — v{desc['contract_version']}")
+    for name, meta in desc["operations"].items():
+        print(f"  [{meta['kind']:<6}] {name:<20} {meta['summary']}")
     return 0
 
 
@@ -408,6 +406,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_session.set_defaults(func=cmd_session)
 
     sub.add_parser("status", help="Patrimoine et disponibilité des sous-systèmes.").set_defaults(func=cmd_status)
+
+    p_contract = sub.add_parser("contract", help="Contrat de la Presentation Layer (opérations exposées).")
+    p_contract.add_argument("--json", action="store_true")
+    p_contract.set_defaults(func=cmd_contract)
     return parser
 
 

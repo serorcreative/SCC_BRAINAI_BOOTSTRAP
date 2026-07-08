@@ -263,6 +263,44 @@ les moteurs exécutent*. Rien d'exécutable n'entre dans le registre ni dans les
 - **Gouverné & déterministe** — cycle de vie `proposed → active → deprecated → retired`
   (transitions validées par un approbateur), ids dérivés du contenu, itérations triées.
 
+## Presentation Layer — le contrat officiel cerveau ↔ visages
+
+La couche de présentation (`presentation/`) est l'**unique frontière** entre le Bootstrap
+(le cerveau) et toutes les interfaces futures (CLI, Web, Desktop, Mobile, API). Elle
+**présente** les opérations déjà publiques sous un **contrat versionné** — sans logique
+métier, sans dépendance UI/réseau.
+
+```
+Bootstrap → Presentation Layer → { CLI, Web, Desktop, Mobile, API REST }
+```
+
+Toute interface consomme **exclusivement** cette couche ; aucune n'appelle les moteurs
+internes. Le **CLI est la première interface** : il passe intégralement par `Presentation`.
+
+```bash
+scc-brainai contract          # les opérations exposées (introspection du contrat)
+```
+
+Chaque opération renvoie une **enveloppe stable** : `{contract_version, operation, kind,
+generated_as_of, data}` où `data` réutilise telle quelle la sortie du Bootstrap (zéro
+duplication). Les opérations sont typées `read` (vue) ou `action` (transfert vers un appel
+public — la couche **ne décide jamais**).
+
+```python
+from scc_brainai_bootstrap.presentation import Presentation
+env = Presentation().overview()      # {"contract_version": "1.0", "operation": "overview", …}
+```
+
+**Garde-fous** : `Presentation` dépend du Bootstrap ; **jamais l'inverse** (vérifié par
+test). Aucune logique métier, aucun workflow, aucune duplication, aucun réseau/daemon,
+aucune dépendance React/Next/Desktop.
+
+**Couture d'extraction** : la couche ne dépend que de l'API publique du Bootstrap + stdlib.
+Elle sera extraite vers un dépôt `SCC_BRAINAI_PRESENTATION` **quand** le contrat aura été
+éprouvé par ≥ 1 interface réelle, ou qu'un 2ᵉ consommateur apparaîtra, ou qu'un
+versionnement indépendant deviendra nécessaire. D'ici là, la séparation est **architecturale
+avant d'être physique**.
+
 ## Overview — le point d'entrée du futur UI (lecture seule)
 
 `overview` agrège en **un seul instantané lecture seule** tout ce que le futur UI devra
@@ -364,7 +402,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 184 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 197 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
