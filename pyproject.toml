@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scc-brainai-bootstrap"
+version = "0.1.0"
+description = "Bootstrap de BrainAI — premier exécutable de démarrage : config, Control Plane, Patrimony, Memory, Knowledge, Event Bus, premiers Agents, puis 'BrainAI READY'. Stdlib pur, déterministe, sans réseau."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+authors = [{ name = "Seror Créative" }]
+keywords = ["scc", "brainai", "bootstrap", "startup"]
+dependencies = []
+
+[project.scripts]
+scc-brainai = "scc_brainai_bootstrap.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

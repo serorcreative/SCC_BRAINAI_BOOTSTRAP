@@ -1,0 +1,9 @@
+{
+  "scc_root": "..",
+  "paths": {
+    "data_dir": "data"
+  },
+  "as_of": "2026-07-06T00:00:00+00:00",
+  "first_agents": ["SCC-AGENT-0001", "SCC-AGENT-0002", "SCC-AGENT-0003", "SCC-AGENT-0020"],
+  "extra": {}
+}
