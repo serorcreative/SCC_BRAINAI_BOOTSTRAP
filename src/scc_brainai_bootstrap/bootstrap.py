@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 import importlib
+import json
 
 from scc_brainai_bootstrap.registry import (
     AdapterRegistry,
@@ -477,6 +478,110 @@ class BrainAIBootstrap:
             result = self.handle(query, deep=deep, record=record)
         result["route"] = chosen
         return result
+
+    # ================================================================== #
+    # Overview — agrégateur LECTURE SEULE (point d'entrée du futur UI)
+    # ================================================================== #
+    def overview(self) -> Dict[str, Any]:
+        """Instantané agrégé de BrainAI pour le futur UI, en **lecture seule**.
+
+        Compose uniquement des vues existantes — il **n'écrit rien** (aucun événement
+        persisté, aucun incrément de session, aucun enregistrement), **ne démarre pas**
+        BrainAI et **ne décide rien** à la place des moteurs. C'est un simple point de
+        rassemblement pour l'affichage ; jamais un moteur de workflow."""
+        self.agents.load()
+        diag = Doctor(self).diagnose()                 # lecture ; ne persiste aucun événement
+        session = self.session.summary()
+        caps = self.agents.capabilities()
+        open_decisions = self._read_open_decisions()
+        learnings = self._read_learnings_overview()
+        recent_events = self._read_recent_events(limit=10)
+        recommendation = self._recommend_next_action(diag, session, open_decisions, learnings)
+        return {
+            "as_of": self.config.as_of,
+            "state": {"verdict": diag["verdict"], "banner": diag["banner"],
+                      "patrimony": diag["sections"]["patrimony"],
+                      "availability": diag["sections"]["availability"]},
+            "session": session,
+            "agents": {"counts": self.agents.counts(),
+                       "namespaces": self.agents.namespaces()},
+            "capabilities": {"count": len(caps), "index": caps},
+            "open_decisions": open_decisions,
+            "learnings": learnings,
+            "recent_events": recent_events,
+            "diagnostics": {"verdict": diag["verdict"], "issues": diag["issues"]},
+            "recommended_next_action": recommendation,
+        }
+
+    def _read_open_decisions(self) -> List[Dict[str, Any]]:
+        """Décisions **proposées** en attente de validation (lecture seule)."""
+        try:
+            if not self.cognition.available():
+                return []
+            records = self.cognition.decision.search(status="proposed")
+        except Exception:  # noqa: BLE001
+            return []
+        return [{"id": r["id"], "subject": r.get("request", {}).get("subject", ""),
+                 "class": r.get("qualification", {}).get("class"), "status": r["status"]}
+                for r in records]
+
+    def _read_learnings_overview(self) -> Dict[str, Any]:
+        """Apprentissages **proposés** et **validés** (lecture seule ; pas d'analyse)."""
+        try:
+            engine = self._provide_learning_engine()
+            if engine is None:
+                return {"proposed": {"count": 0, "items": []},
+                        "validated": {"count": 0, "items": []}}
+        except Exception:  # noqa: BLE001
+            return {"proposed": {"count": 0, "items": []},
+                    "validated": {"count": 0, "items": []}}
+
+        def summarize(status: str) -> Dict[str, Any]:
+            items = engine.search(status=status, limit=1000)
+            top = [{"id": it["id"], "kind": it["kind"], "title": it["title"]}
+                   for it in items[:5]]
+            return {"count": len(items), "items": top}
+        return {"proposed": summarize("proposed"), "validated": summarize("validated")}
+
+    def _read_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Derniers événements du journal persistant (lecture seule)."""
+        path = self.events_path
+        if not path.exists():
+            return []
+        try:
+            lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            return [json.loads(l) for l in lines[-limit:]]
+        except Exception:  # noqa: BLE001
+            return []
+
+    @staticmethod
+    def _recommend_next_action(diag, session, open_decisions, learnings) -> Dict[str, Any]:
+        """« Prochaine action recommandée » — règles **déterministes** et documentées.
+        Suggère une action à l'utilisateur ; ne décide **jamais** à la place des moteurs.
+
+        Priorité (première règle vraie) :
+        1. pile dégradée        → diagnostic complet ;
+        2. décision(s) ouverte(s) → validation humaine ;
+        3. apprentissage(s) proposé(s) → revue humaine ;
+        4. session inexistante   → démarrer BrainAI ;
+        5. sinon                 → traiter une demande."""
+        if diag["verdict"] != "healthy":
+            return {"action": "diagnostiquer", "reason": "pile dégradée",
+                    "command": "scc-brainai doctor"}
+        if open_decisions:
+            return {"action": "valider une décision",
+                    "reason": f"{len(open_decisions)} décision(s) en attente de validation",
+                    "command": f"scc-brainai validate {open_decisions[0]['id']} --by <acteur>"}
+        proposed = learnings["proposed"]["count"]
+        if proposed:
+            return {"action": "revoir les apprentissages",
+                    "reason": f"{proposed} apprentissage(s) proposé(s)",
+                    "command": "scc-brainai learnings --status proposed"}
+        if not session.get("exists"):
+            return {"action": "démarrer BrainAI", "reason": "aucune session ouverte",
+                    "command": "scc-brainai start"}
+        return {"action": "traiter une demande", "reason": "pile saine, rien en attente",
+                "command": "scc-brainai run \"…\""}
 
     # ================================================================== #
     # Diagnostic complet

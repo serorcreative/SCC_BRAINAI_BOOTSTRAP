@@ -54,9 +54,10 @@ class MemoryComponent:
         if not _add_path(self._config.memory_src):
             return {"name": self.name, "ready": False, "detail": "src introuvable"}
         try:
-            mem = importlib.import_module("scc_brainai_memory")
-            cfg = mem.MemoryConfig(data_dir=self._config.memory_data_dir)
-            self.store = mem.BrainMemoryStore(config=cfg)
+            if self.store is None:      # idempotent : une seule instance de store par process
+                mem = importlib.import_module("scc_brainai_memory")
+                cfg = mem.MemoryConfig(data_dir=self._config.memory_data_dir)
+                self.store = mem.BrainMemoryStore(config=cfg)
             counts = self.store.counts()
             return {"name": self.name, "ready": True,
                     "detail": f"entrées={sum(counts.values())}", "data": {"counts": counts}}

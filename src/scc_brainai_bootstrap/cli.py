@@ -273,6 +273,35 @@ def cmd_resolve(args) -> int:
     return 0 if result["resolved"] else 1
 
 
+def cmd_overview(args) -> int:
+    ov = _boot(args).overview()
+    if args.json:
+        print(json.dumps(ov, ensure_ascii=False, indent=2))
+        return 0
+    st, se, ag = ov["state"], ov["session"], ov["agents"]
+    print("┌─ BrainAI OVERVIEW " + "─" * 40)
+    print(f"│ état       : {st['banner']}  ({st['patrimony']['present']}/{st['patrimony']['total']} composants)")
+    if se.get("exists"):
+        print(f"│ session    : {se['session_id']} · démarrage n°{se['boots']}")
+    else:
+        print("│ session    : (aucune — BrainAI n'a pas encore démarré ici)")
+    print(f"│ agents     : {ag['counts']['agents']}  ·  capacités : {ov['capabilities']['count']}"
+          f"  ·  namespaces : {', '.join(ag['namespaces'])}")
+    od = ov["open_decisions"]
+    print(f"│ décisions  : {len(od)} ouverte(s)" + (f" (ex. {od[0]['id']})" if od else ""))
+    lp, lv = ov["learnings"]["proposed"]["count"], ov["learnings"]["validated"]["count"]
+    print(f"│ apprentis. : {lp} proposé(s) · {lv} validé(s)")
+    print(f"│ diagnostic : {ov['diagnostics']['verdict']}"
+          + (f" — {', '.join(ov['diagnostics']['issues'])}" if ov["diagnostics"]["issues"] else ""))
+    print(f"│ événements : {len(ov['recent_events'])} récents au journal")
+    rec = ov["recommended_next_action"]
+    print("├─ prochaine action recommandée " + "─" * 27)
+    print(f"│ → {rec['action']} ({rec['reason']})")
+    print(f"│   {rec['command']}")
+    print("└" + "─" * 58)
+    return 0
+
+
 def cmd_status(args) -> int:
     boot = _boot(args)
     print(json.dumps({
@@ -369,6 +398,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_resolve.add_argument("capability")
     p_resolve.add_argument("--json", action="store_true")
     p_resolve.set_defaults(func=cmd_resolve)
+
+    p_overview = sub.add_parser("overview", help="Instantané agrégé de BrainAI (lecture seule, point d'entrée UI).")
+    p_overview.add_argument("--json", action="store_true")
+    p_overview.set_defaults(func=cmd_overview)
 
     p_session = sub.add_parser("session", help="État de la session persistée (continuité, sans démarrer).")
     p_session.add_argument("--json", action="store_true")

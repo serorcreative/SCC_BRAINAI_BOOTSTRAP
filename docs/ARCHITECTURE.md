@@ -49,9 +49,9 @@ registry/    Registre d'agents déclaratif & orienté capacités :
 router       routage lexical déterministe (décision → decide ; sinon → Kernel)
 doctor       Doctor (diagnostic : patrimoine, disponibilité, santé, audits)
 bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/plan/validate/execute · learn ·
-             agents_catalog/capability_index/resolve_capability · doctor · session)
+             agents_catalog/capability_index/resolve_capability · overview · doctor · session)
 cli          scc-brainai (start / run / decide / plan / validate / execute / learn / learnings /
-             learn-validate / agents / capabilities / resolve / doctor / events / session / status)
+             learn-validate / agents / capabilities / resolve / overview / doctor / events / session / status)
 ```
 
 ## 4. Invariants tenus
@@ -71,4 +71,5 @@ cli          scc-brainai (start / run / decide / plan / validate / execute / lea
 - Cataloguer les 16 autres fiches SCC (étendre FicheSource au-delà des pivots) + leurs capacités.
 - Figer la taxonomie des capacités (V1 → stable) une fois la gouvernance SCC prononcée.
 - Métadonnées d'orchestration réelles (coût, latence, fiabilité) pour un routage multi-fournisseurs.
+- Première interface réelle branchée sur `overview` (voir `docs/ARCHITECTURE_SNAPSHOT_v0.12.0.md`).
 - Exposer un mode « live » réseau (démon/service) une fois l'API réseau décidée (ADR).

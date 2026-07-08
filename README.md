@@ -263,6 +263,35 @@ les moteurs exécutent*. Rien d'exécutable n'entre dans le registre ni dans les
 - **Gouverné & déterministe** — cycle de vie `proposed → active → deprecated → retired`
   (transitions validées par un approbateur), ids dérivés du contenu, itérations triées.
 
+## Overview — le point d'entrée du futur UI (lecture seule)
+
+`overview` agrège en **un seul instantané lecture seule** tout ce que le futur UI devra
+afficher : état, session, agents, capacités, décisions ouvertes, apprentissages, journal,
+diagnostics, et une **prochaine action recommandée** (déterministe).
+
+```bash
+scc-brainai overview          # tableau de bord textuel
+scc-brainai overview --json   # même contenu, pour un UI
+```
+
+```
+┌─ BrainAI OVERVIEW ────────────────────────────────────────
+│ état       : BrainAI HEALTHY  (21/21 composants)
+│ session    : ses_f868104ff8de · démarrage n°7
+│ agents     : 9  ·  capacités : 21  ·  namespaces : brainai, scc
+│ décisions  : 1 ouverte(s) (ex. dec_d63af9801ff8)
+│ apprentis. : 22 proposé(s) · 0 validé(s)
+├─ prochaine action recommandée ───────────────────────────
+│ → valider une décision (1 décision en attente de validation)
+│   scc-brainai validate dec_d63af9801ff8 --by <acteur>
+└──────────────────────────────────────────────────────────
+```
+
+**Contrat** : lecture seule stricte — n'écrit rien, ne persiste aucun événement, n'ouvre
+aucune session, ne démarre pas BrainAI, ne décide rien. Il **compose** des vues existantes ;
+jamais un moteur de workflow. Voir la photographie complète des fondations :
+[`docs/ARCHITECTURE_SNAPSHOT_v0.12.0.md`](docs/ARCHITECTURE_SNAPSHOT_v0.12.0.md).
+
 ## Continuité de session (mode « live »)
 
 Chaque commande démarre un processus neuf ; sans mémoire de session, ces invocations
@@ -335,7 +364,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 173 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 184 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
