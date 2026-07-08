@@ -39,10 +39,14 @@ UI  ──►  Presentation Layer (contrat)  ──►  Bootstrap (cerveau)
 Cette règle est **structurellement garantie** : l'UI est en TypeScript/natif et ne peut pas
 importer le Python du cerveau. La seule porte d'entrée est le **contrat servi sur un fil**.
 
-Corollaire de la doctrine permanente de BrainAI :
+Doctrine permanente de BrainAI (6 règles) :
 
-> le registre décrit · le Bootstrap orchestre · les moteurs exécutent · overview observe ·
-> **l'interface présente — elle n'agit jamais d'elle-même.**
+> 1. le registre décrit · 2. le Bootstrap orchestre · 3. les moteurs exécutent ·
+> 4. `overview` observe · 5. **l'interface présente — elle n'agit jamais d'elle-même** ·
+> 6. **le transport n'expose jamais une implémentation — uniquement un contrat**
+>    (vrai quels que soient les transports futurs : HTTP, stdio, gRPC, …).
+
+Les décisions de transport sont figées dans les [ADR](adr/README.md) (ADR-UI-001/002/003/005).
 
 ---
 
@@ -181,15 +185,28 @@ SCC_BRAINAI_UI             web/desktop/mobile (TypeScript) → client généré 
 `PRESENTATION` importe `BOOTSTRAP` ; `UI` ne dépend que du **contrat** (HTTP/JSON + client
 généré), jamais du Python du cerveau.
 
+**Topologie transitoire — décision ADR-UI-005 (extraction différée, guidée par l'usage) :**
+
+L'extraction est **différée** jusqu'à ce qu'une interface réelle ait éprouvé le contrat. D'ici
+là, le contrat reste dans le Bootstrap, et le **transport vit côté produit** (dépôt UI) — jamais
+dans le cerveau :
+
+```
+SCC_BRAINAI_BOOTSTRAP   cerveau + presentation/ (contrat, pur, sans réseau)   — inchangé
+        ▲ import sys.path (API publique seule)
+SCC_BRAINAI_UI          transport HTTP/JSON (Python, thin) + frontend (TS)     — dépôt produit
+```
+
 **Approche progressive (séparation d'abord architecturale, physique ensuite) :**
 
-- **Étape 0** — *(ce document)* figer la direction.
-- **Étape 1** — extraire `presentation/` vers `SCC_BRAINAI_PRESENTATION` **et** y ajouter
-  l'adaptateur de transport ; exporter le schéma de contrat. Déclenche l'ADR réseau (loopback).
-- **Étape 2** — créer `SCC_BRAINAI_UI` : client généré + **SPA Web de référence** (accueil =
-  dashboard `overview`).
-- **Étape 3** — **Desktop Tauri** : même frontend + sidecar Python.
-- **Étape 4** — **Mobile Capacitor** : emballage de la SPA.
+- **Étape 0** — *(ce document + ADR)* figer la direction et les décisions de transport.
+- **Étape 1** — créer `SCC_BRAINAI_UI` ; y ajouter le **transport** (loopback HTTP/JSON, stdlib)
+  important `presentation/` du Bootstrap via `sys.path` ; **client généré** + **SPA Web de
+  référence** (accueil = dashboard `overview`). *`presentation/` reste dans le Bootstrap.*
+- **Étape 2** — **Desktop Tauri** : même frontend + sidecar Python.
+- **Étape 3** — **Mobile Capacitor** : emballage de la SPA.
+- **Étape 4 (quand un critère d'extraction est atteint)** — extraire `presentation/` (+ CLI +
+  transport) vers `SCC_BRAINAI_PRESENTATION` ; convergence vers la topologie cible à 3 dépôts.
 
 Chaque étape est livrable et testable indépendamment ; **aucune ne touche le cerveau**.
 
@@ -201,49 +218,52 @@ Chaque étape est livrable et testable indépendamment ; **aucune ne touche le c
 ## 8. Extraction future de `SCC_BRAINAI_PRESENTATION`
 
 La couche `presentation/` vit aujourd'hui **dans le Bootstrap** (couture d'extraction propre :
-elle ne dépend que de l'API publique du Bootstrap + stdlib). Le chantier UI **déclenche** le
-critère d'extraction posé au BUILD-014 (« ≥ 1 interface réelle / 2ᵉ consommateur »).
+elle ne dépend que de l'API publique du Bootstrap + stdlib). Par décision **ADR-UI-005**,
+l'extraction est **différée et guidée par l'usage** : on la justifiera par les besoins réels
+d'une première interface, pas par anticipation.
 
-**Plan d'extraction (à exécuter en Étape 1, chantier dédié) :**
+**Plan d'extraction (chantier dédié futur, quand un critère est atteint) :**
 
-1. Déplacer `src/scc_brainai_bootstrap/presentation/` → dépôt `SCC_BRAINAI_PRESENTATION`.
-2. Y ajouter l'**adaptateur de transport** (dispatcher générique HTTP/JSON).
-3. `PRESENTATION` charge le Bootstrap comme composant sibling (mécanique `sys.path` déjà utilisée
-   dans l'écosystème), via son **API publique uniquement**.
-4. Conserver `CONTRACT_VERSION` comme frontière de compatibilité ; le déplacement **n'est pas**
+1. Déplacer `src/scc_brainai_bootstrap/presentation/` (+ `cli.py` + transport) → `SCC_BRAINAI_PRESENTATION`.
+2. `PRESENTATION` charge le Bootstrap comme composant sibling (`sys.path`), via son **API publique uniquement**.
+3. Conserver `CONTRACT_VERSION` comme frontière de compatibilité ; le déplacement **n'est pas**
    une rupture de contrat (mêmes opérations, même enveloppe).
 
-Tant que l'extraction n'est pas faite, le CLI continue de consommer `presentation/` in-repo :
-la séparation reste **architecturale** avant d'être **physique**.
+**Critère d'extraction (l'un suffit)** : contrat éprouvé par ≥ 1 interface réelle ; 2ᵉ consommateur ;
+besoin de versionnement indépendant. Tant que l'extraction n'est pas faite, la séparation reste
+**architecturale** avant d'être **physique** (cf. [ADR-UI-005](adr/ADR-UI-005-extraction-presentation.md)).
 
 ---
 
-## 9. Décisions encore ouvertes — ADR à traiter
+## 9. Décisions d'architecture — ADR
 
-Chaque ADR est à instruire **avant** l'étape qui en dépend. Aucune n'est tranchée par ce document.
+Décisions figées et sujets ouverts. Détail : [`docs/adr/`](adr/README.md).
 
-| ADR | Sujet | Enjeu | Bloque |
-|-----|-------|-------|--------|
-| **ADR-UI-001** | **Réseau & exposition** | loopback-only d'abord ; conditions d'un accès distant | Étape 1 |
-| **ADR-UI-002** | **Protocole de transport** | HTTP/JSON (retenu par défaut) vs stdio/JSON-RPC pour un tout-local sans port ; ou les deux | Étape 1 |
-| **ADR-UI-003** | **Dépendances du transport** | stdlib `http.server` (zéro dép, aligné cerveau) vs FastAPI/uvicorn (ergonomie, OpenAPI) — dans le dépôt Presentation, pas le cerveau | Étape 1 |
-| **ADR-UI-004** | **Authentification & sécurité** | jetons/session, TLS, CORS — requis dès qu'on sort du loopback | Étape 2+ (distant) |
-| **ADR-UI-005** | **Moment d'extraction** | extraire `presentation/` maintenant vs après SPA de référence | Étape 1 vs 2 |
-| **ADR-UI-006** | **Codegen du client** | dérivé de `describe()` (maison) vs OpenAPI → générateur standard | Étape 2 |
-| **ADR-UI-007** | **Packaging Desktop** | bundling du sidecar Python dans Tauri (interpréteur embarqué, signature, mises à jour) | Étape 3 |
-| **ADR-UI-008** | **Stratégie Mobile** | Capacitor (emballage SPA, retenu) vs React Native (natif) ; online-only vs offline | Étape 4 |
-| **ADR-UI-009** | **État & offline** | cache client, persistance, comportement hors-ligne | Étape 2+ |
+| ADR | Sujet | Statut / décision |
+|-----|-------|-------------------|
+| [**ADR-UI-001**](adr/ADR-UI-001-reseau-loopback.md) | Réseau / loopback | ✅ **Accepté** — loopback `127.0.0.1` + port éphémère + jeton ; jamais `0.0.0.0` |
+| [**ADR-UI-002**](adr/ADR-UI-002-protocole-transport.md) | Protocole de transport | ✅ **Accepté** — HTTP/JSON canonique, `POST /v1/{operation}` |
+| [**ADR-UI-003**](adr/ADR-UI-003-dependances-transport-python.md) | Dépendances transport | ✅ **Accepté** — stdlib `http.server` d'abord ; migration ASGI sur besoin objectif |
+| [**ADR-UI-005**](adr/ADR-UI-005-extraction-presentation.md) | Extraction Presentation | ✅ **Accepté** — **différée**, guidée par l'usage ; transport côté produit d'ici là |
+| **ADR-UI-004** | Authentification & accès distant | ⏳ Ouvert — requis dès qu'on sort du loopback (Étape 2+) |
+| **ADR-UI-006** | Codegen du client | ⏳ Ouvert — `describe()` (maison) vs OpenAPI (Étape 1/2) |
+| **ADR-UI-007** | Packaging Desktop (Tauri) | ⏳ Ouvert — bundling du sidecar Python (Étape Desktop) |
+| **ADR-UI-008** | Stratégie Mobile (Capacitor) | ⏳ Ouvert — online-only vs offline (Étape Mobile) |
+| **ADR-UI-009** | État & offline | ⏳ Ouvert — cache, persistance, hors-ligne (Étape 2+) |
 
 ---
 
 ## 10. Invariants de la phase Produit (à ne jamais violer)
 
-1. `UI → Presentation → Bootstrap` — unidirectionnel, jamais court-circuité.
+1. `UI → Transport → Presentation → Bootstrap` — unidirectionnel, jamais court-circuité.
 2. Le Bootstrap reste **pur** : aucune dépendance UI/réseau ne remonte dans le cerveau.
 3. **Un seul contrat**, dérivé mécaniquement de `describe()` ; versionné (`CONTRACT_VERSION`).
 4. L'UI **présente et transfère** ; elle **ne décide jamais** ; l'humain valide les actions gouvernées.
-5. Un codebase UI unique → trois shells (Web / Desktop / Mobile).
-6. Chaque évolution passe par un **ADR** lorsqu'elle touche réseau, sécurité, transport ou packaging.
+5. **Le transport n'expose jamais une implémentation — uniquement un contrat** (Doctrine n°6) :
+   liste blanche des opérations, aucun accès à Bootstrap/Registry/Adapters/Engines. Vrai pour
+   tout transport futur (HTTP, stdio, gRPC…).
+6. Un codebase UI unique → trois shells (Web / Desktop / Mobile).
+7. Chaque évolution passe par un **ADR** lorsqu'elle touche réseau, sécurité, transport ou packaging.
 
 ---
 
