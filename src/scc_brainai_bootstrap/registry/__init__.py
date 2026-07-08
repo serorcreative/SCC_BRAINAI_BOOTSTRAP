@@ -33,6 +33,7 @@ from scc_brainai_bootstrap.registry.sources import (
     DescriptorSource,
     FicheSource,
     ManifestSource,
+    load_capability_map,
 )
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "DescriptorSource",
     "ManifestSource",
     "FicheSource",
+    "load_capability_map",
     "AgentAdapter",
     "AdapterRegistry",
     "CapabilityResolver",

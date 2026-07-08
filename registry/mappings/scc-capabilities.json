@@ -1,0 +1,13 @@
+{
+  "__meta__": {
+    "version": "v1",
+    "status": "evolving-before-public-stabilization",
+    "governance": "non figé — les slugs ne sont PAS des identifiants métier immuables tant que la gouvernance SCC ne les a pas figés",
+    "rule": "mapping EXPLICITE agent_id -> [domaine.action] ; hand-authored ; aucune inférence depuis le texte des fiches ; validation légère du format ; déterministe",
+    "scope": "BUILD-012 : les 4 agents pivots catalogués via 00_SYSTEM/agents"
+  },
+  "SCC-AGENT-0001": ["architecture.arbitrate", "architecture.review", "governance.oversee"],
+  "SCC-AGENT-0002": ["governance.enforce", "governance.audit"],
+  "SCC-AGENT-0003": ["foundation.guard", "contract.validate"],
+  "SCC-AGENT-0020": ["orchestration.supervise", "orchestration.compose"]
+}

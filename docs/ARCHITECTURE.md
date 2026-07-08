@@ -43,8 +43,9 @@ learning     LearningLayer (Learning branché sur la mémoire vivante → propos
 session      SessionStore (manifeste persistant : identité, démarrages, totaux d'activité)
 registry/    Registre d'agents déclaratif & orienté capacités :
                descriptor (données pures) · capability (slugs domaine.action) ·
-               sources (manifests JSON + adaptation des fiches) · registry (index,
-               gouvernance) · adapter (liaison paresseuse + CapabilityResolver)
+               sources (manifests JSON + adaptation des fiches + mapping capacités) ·
+               registry (index, gouvernance) · adapter (liaison paresseuse + CapabilityResolver)
+               mappings/scc-capabilities.json : capacités des fiches SCC (déclaratif, V1, non figé)
 router       routage lexical déterministe (décision → decide ; sinon → Kernel)
 doctor       Doctor (diagnostic : patrimoine, disponibilité, santé, audits)
 bootstrap    BrainAIBootstrap (8 étapes · run_query · decide/plan/validate/execute · learn ·
@@ -67,6 +68,7 @@ cli          scc-brainai (start / run / decide / plan / validate / execute / lea
 
 ## 5. Prochaines incréments (backlog)
 
-- Mapper les capacités `domaine.action` sur les fiches SCC (au-delà des manifests BrainAI).
+- Cataloguer les 16 autres fiches SCC (étendre FicheSource au-delà des pivots) + leurs capacités.
+- Figer la taxonomie des capacités (V1 → stable) une fois la gouvernance SCC prononcée.
 - Métadonnées d'orchestration réelles (coût, latence, fiabilité) pour un routage multi-fournisseurs.
 - Exposer un mode « live » réseau (démon/service) une fois l'API réseau décidée (ADR).

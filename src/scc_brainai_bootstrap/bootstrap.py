@@ -28,6 +28,7 @@ from scc_brainai_bootstrap.registry import (
     CapabilityResolver,
     FicheSource,
     ManifestSource,
+    load_capability_map,
 )
 from scc_brainai_bootstrap.components import (
     ControlPlaneComponent,
@@ -64,9 +65,12 @@ class BrainAIBootstrap:
         self.kernel = KernelComponent(self.config)
         # Registre d'agents déclaratif (catalogue) alimenté par sources pluggables :
         # manifests JSON locaux (agents BrainAI) + adaptation des fiches SCC existantes.
+        # Câblage unique (pas par agent) : le mapping capacités des fiches SCC est
+        # déclaratif — ajouter/éditer des capacités = éditer le JSON, sans toucher au code.
         self.agents = AgentRegistry(self.config, sources=[
             ManifestSource(self.config.agents_registry_dir, name="brainai"),
-            FicheSource(self.config.agents_dir, self.config.first_agents, namespace="scc"),
+            FicheSource(self.config.agents_dir, self.config.first_agents, namespace="scc",
+                        capability_map=load_capability_map(self.config.capability_map_path)),
         ])
         self.learning = LearningLayer(self.config)
         # La cognition reçoit un fournisseur du moteur Learning partagé : la boucle

@@ -96,6 +96,11 @@ class BrainAIConfig:
         """Descripteurs déclaratifs d'agents (manifests JSON versionnés)."""
         return self.bootstrap_root / "registry" / "agents"
 
+    @property
+    def capability_map_path(self) -> Path:
+        """Mapping déclaratif agent_id → capacités pour les fiches SCC (V1, non figé)."""
+        return self.bootstrap_root / "registry" / "mappings" / "scc-capabilities.json"
+
     # -- répertoires d'état du bootstrap -------------------------------- #
     @property
     def memory_data_dir(self) -> Path:

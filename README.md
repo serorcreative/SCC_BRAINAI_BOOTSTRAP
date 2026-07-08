@@ -245,6 +245,21 @@ CAPACITÉS (12)  — capacité → fournisseur(s)
   `domoo`, `transalyn`, `dreamforge`, `roadtrip`, `barry`… dans le même modèle.
 - **Sources pluggables** — manifests JSON (agents BrainAI) **+** adaptation lecture-seule des
   fiches `00_SYSTEM/agents` (agents SCC). En ajouter une n'impacte ni le registre ni le Bootstrap.
+
+### Mapping des capacités des fiches SCC
+
+Les capacités des agents SCC sont **déclarées explicitement** dans
+`registry/mappings/scc-capabilities.json` (`agent_id → [domaine.action]`) — **aucune
+inférence** depuis le texte des fiches. Le fichier est hand-authored, versionné, déterministe ;
+l'ajouter/éditer ne touche **pas** le code (câblage unique dans le Bootstrap). Les 4 pivots
+entrent ainsi dans l'index de capacités.
+
+Séparation des rôles vérifiée : un agent SCC **décrit** est visible dans l'index et candidat à
+la résolution, mais reste **`available: false`** faute d'adaptateur/moteur — *le registre décrit,
+les moteurs exécutent*. Rien d'exécutable n'entre dans le registre ni dans les fiches.
+
+> Taxonomie **V1, évolutive** avant stabilisation publique. Les slugs ne sont **pas** des
+> identifiants métier immuables tant que la gouvernance SCC ne les a pas figés.
 - **Gouverné & déterministe** — cycle de vie `proposed → active → deprecated → retired`
   (transitions validées par un approbateur), ids dérivés du contenu, itérations triées.
 
@@ -320,7 +335,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 159 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # 173 tests (déterministes ; démarrage réel des composants)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

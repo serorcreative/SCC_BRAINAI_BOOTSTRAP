@@ -21,6 +21,29 @@ from typing import Any, Dict, Iterable, List
 from scc_brainai_bootstrap.registry.descriptor import AgentDescriptor, AgentState
 
 
+def load_capability_map(path: Path) -> Dict[str, List[str]]:
+    """Charge le **mapping déclaratif** ``agent_id -> [domaine.action]`` (V1, non figé).
+
+    Mapping **explicite** et hand-authored : aucune inférence depuis le texte des fiches.
+    Robuste : fichier absent/illisible → mapping vide ; clés méta (``__…__``) ignorées ;
+    seules les valeurs de type liste sont retenues."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, List[str]] = {}
+    for key, value in raw.items():
+        if key.startswith("__") or not isinstance(value, list):
+            continue
+        out[key] = [str(v) for v in value]
+    return out
+
+
 class DescriptorSource:
     """Protocole : fournit une liste de descripteurs (non finalisés)."""
 
@@ -73,19 +96,25 @@ class FicheSource(DescriptorSource):
 
     name = "fiche"
 
-    def __init__(self, agents_dir: Path, ids: Iterable[str], namespace: str = "scc"):
+    def __init__(self, agents_dir: Path, ids: Iterable[str], namespace: str = "scc",
+                 capability_map: Dict[str, List[str]] = None):
         self._dir = Path(agents_dir)
         self._ids = list(ids)
         self._namespace = namespace
+        # Mapping déclaratif agent_id -> [domaine.action] (V1). Les capacités des fiches
+        # ne sont pas inférées : elles proviennent uniquement de ce mapping explicite.
+        self._capabilities = dict(capability_map or {})
 
     def descriptors(self) -> List[AgentDescriptor]:
         return [self._one(aid) for aid in self._ids]
 
     def _one(self, agent_id: str) -> AgentDescriptor:
+        caps = list(self._capabilities.get(agent_id, []))
         matches = sorted(self._dir.glob(f"{agent_id}-*.md")) if self._dir.exists() else []
         if not matches:
             return AgentDescriptor(id=agent_id, namespace=self._namespace,
                                    name="(fiche absente)", state=AgentState.PROPOSED,
+                                   capabilities=caps,
                                    source=f"{self.name}:absent", tags=["fiche", "missing"])
         path = matches[0]
         text = path.read_text(encoding="utf-8")
@@ -111,7 +140,7 @@ class FicheSource(DescriptorSource):
         return AgentDescriptor(
             id=agent_id, namespace=self._namespace, name=name,
             role=pick("famille"), version=pick("version") or "1.0",
-            description=self._mission(text),
+            description=self._mission(text), capabilities=caps,
             state=AgentState.ACTIVE, autonomy=autonomy or "suggest", trust=trust,
             source=f"{self.name}:{path.name}", tags=["fiche", "scc"],
             extra={"raw_capabilities": sorted(set(raw_caps))} if raw_caps else {},
@@ -123,4 +152,4 @@ class FicheSource(DescriptorSource):
         return re.sub(r"\s+", " ", m.group(1)).strip()[:200] if m else ""
 
 
-__all__ = ["DescriptorSource", "ManifestSource", "FicheSource"]
+__all__ = ["DescriptorSource", "ManifestSource", "FicheSource", "load_capability_map"]
