@@ -252,6 +252,7 @@ Décisions figées et sujets ouverts. Détail : [`docs/adr/`](adr/README.md).
 | [**ADR-UI-008**](adr/ADR-UI-008-mobile-capacitor.md) | Cible Mobile (Capacitor) | ✅ **Conteneur accepté · impl. différée** — bloqué par le réseau (loopback impossible sur mobile), conditionné à ADR-UI-004 |
 | [**ADR-UI-004**](adr/ADR-UI-004-acces-reseau-securise.md) | Accès réseau sécurisé | ✅ **Architecture acceptée · impl. différée** — mode réseau opt-in (LAN TLS+pairing / overlay chiffré) ; exposition publique rejetée par défaut ; débloque distant **et** mobile |
 | [**ADR-UI-009**](adr/ADR-UI-009-etat-cache-offline.md) | État, cache & offline | ✅ **Architecture acceptée · impl. différée** — l'UI reflète (jamais ne possède) ; cache non autoritatif ; offline = instantané lecture seule ; aucune techno de persistance choisie |
+| [**ADR-UI-011**](adr/ADR-UI-011-actions-distantes-gouvernees.md) | Actions à distance gouvernées | ✅ **Cadre accepté · impl. différée** — l'UI *demande*, le cerveau *gouverne* ; 6 étapes (affichage/intention/demande/validation/exécution/résultat) ; remote actions désactivées (prérequis ADR-004) ; idempotence + audit exigés |
 
 ---
 

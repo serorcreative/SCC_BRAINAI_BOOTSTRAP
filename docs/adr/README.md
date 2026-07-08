@@ -18,6 +18,7 @@ et ses conséquences. Voir la direction d'ensemble : [`../ARCHITECTURE_UI.md`](.
 | [ADR-UI-008](ADR-UI-008-mobile-capacitor.md) | Cible Mobile (Capacitor) | ✅ Conteneur accepté · ⏳ implémentation différée (conditionnée à ADR-UI-004) |
 | [ADR-UI-004](ADR-UI-004-acces-reseau-securise.md) | Accès réseau sécurisé | ✅ Architecture acceptée · ⏳ impl. différée · ❌ exposition publique rejetée par défaut |
 | [ADR-UI-009](ADR-UI-009-etat-cache-offline.md) | État, cache & offline | ✅ Architecture acceptée · ⏳ impl. différée · 🚫 aucune techno de persistance choisie |
+| [ADR-UI-011](ADR-UI-011-actions-distantes-gouvernees.md) | Actions à distance gouvernées | ✅ Cadre accepté · ⏳ impl. différée · 🔒 actions distantes désactivées (prérequis ADR-004) |
 
 ## Doctrine permanente de BrainAI
 
