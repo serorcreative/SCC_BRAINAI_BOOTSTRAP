@@ -55,6 +55,10 @@ class BrainAIConfig:
         return self.scc_root / "04_KNOWLEDGE" / "src"
 
     @property
+    def kernel_src(self) -> Path:
+        return self.scc_root / "10_BRAINAI" / "src"
+
+    @property
     def agents_dir(self) -> Path:
         return self.scc_root / "00_SYSTEM" / "agents"
 

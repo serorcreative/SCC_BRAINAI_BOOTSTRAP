@@ -1,6 +1,7 @@
 """CLI de démarrage de BrainAI (``scc-brainai``).
 
-``start`` exécute la séquence de démarrage et affiche « BrainAI READY ».
+``start``  exécute la séquence de démarrage et affiche « BrainAI READY ».
+``run``    traite une demande de bout en bout (bootstrap → Kernel → Memory).
 ``status`` affiche le patrimoine et l'état des sous-systèmes (sans démarrer).
 """
 
@@ -36,6 +37,28 @@ def cmd_start(args) -> int:
     return 0 if report["ready"] else 1
 
 
+def cmd_run(args) -> int:
+    boot = _boot(args)
+    result = boot.handle(args.query, deep=bool(args.deep), record=not args.no_record)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
+    if not result.get("ok"):
+        print(f"✗ {result.get('error', 'échec')}")
+        return 1
+    print(f"intention   : {result['intent']}")
+    print(f"agents      : {', '.join(result['agents'])}")
+    print(f"gouvernance : {result['governance']['doctrines']} doctrine(s), "
+          f"{result['governance']['adrs']} ADR")
+    print(f"runtime     : {result['runtime']['kind']} → {result['runtime']['status']}")
+    if result.get("recorded"):
+        print(f"mémorisé    : trace {result['recorded']['trace_id']} "
+              f"({result['recorded']['events']} événements)")
+    print("\n--- synthèse ---")
+    print(result["synthesis"])
+    return 0
+
+
 def cmd_status(args) -> int:
     boot = _boot(args)
     print(json.dumps({
@@ -60,6 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_start = sub.add_parser("start", help="Démarrer BrainAI (séquence complète).")
     p_start.add_argument("--json", action="store_true", help="Sortie JSON du rapport de démarrage.")
     p_start.set_defaults(func=cmd_start)
+
+    p_run = sub.add_parser("run", help="Traiter une demande de bout en bout (Kernel + Memory).")
+    p_run.add_argument("query")
+    p_run.add_argument("--deep", action="store_true", help="Passe cognitive complète (5 moteurs).")
+    p_run.add_argument("--no-record", action="store_true", help="Ne pas mémoriser l'expérience.")
+    p_run.add_argument("--json", action="store_true", help="Sortie JSON complète.")
+    p_run.set_defaults(func=cmd_run)
 
     sub.add_parser("status", help="Patrimoine et disponibilité des sous-systèmes.").set_defaults(func=cmd_status)
     return parser

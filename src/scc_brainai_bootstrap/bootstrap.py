@@ -20,9 +20,12 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
+import importlib
+
 from scc_brainai_bootstrap.agents import AgentRegistry
 from scc_brainai_bootstrap.components import (
     ControlPlaneComponent,
+    KernelComponent,
     KnowledgeComponent,
     MemoryComponent,
 )
@@ -41,7 +44,9 @@ class BrainAIBootstrap:
         self.control_plane = ControlPlaneComponent(self.config)
         self.memory = MemoryComponent(self.config)
         self.knowledge = KnowledgeComponent(self.config)
+        self.kernel = KernelComponent(self.config)
         self.agents = AgentRegistry(self.config)
+        self._booted = False
 
     def run(self, on_step: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
         """Exécute la séquence de démarrage et renvoie un rapport structuré."""
@@ -100,6 +105,7 @@ class BrainAIBootstrap:
         if on_step:
             on_step({"n": 8, "name": "ready", "ok": overall, "detail": banner, "data": {}})
 
+        self._booted = True
         return {
             "as_of": self.config.as_of,
             "ready": overall,
@@ -110,6 +116,54 @@ class BrainAIBootstrap:
             "agents": self.agents.to_list(),
             "events": self.bus.events,
             "event_count": len(self.bus),
+        }
+
+    # ================================================================== #
+    # Cycle de bout en bout : bootstrap -> Kernel -> (Memory)
+    # ================================================================== #
+    def handle(self, query: str, deep: bool = False, record: bool = True) -> Dict[str, Any]:
+        """Traite une demande de bout en bout : démarre BrainAI si besoin, délègue
+        au Kernel (10), et **enregistre l'expérience dans Memory** (11) si disponible.
+
+        Aucune couche n'est modifiée : le Kernel et l'enregistreur Memory sont
+        utilisés via leurs interfaces publiques.
+        """
+        if not self._booted:
+            self.run()
+        kc = self.kernel.init()
+        if not kc["ready"] or self.kernel.kernel is None:
+            self.bus.publish("kernel.unavailable", {"detail": kc["detail"]})
+            return {"ok": False, "query": query, "error": f"Kernel indisponible : {kc['detail']}"}
+
+        self.bus.publish("request.received", {"query": query, "deep": deep})
+        response = self.kernel.kernel.handle(query, options={"deep": deep})
+        self.bus.publish("request.handled",
+                         {"intent": response.get("intent"), "ok": response.get("ok")})
+
+        recorded = None
+        if record and self.memory.store is not None:
+            try:
+                recorder = importlib.import_module("scc_brainai_memory").KernelRecorder(self.memory.store)
+                rec = recorder.record_response(response)
+                recorded = {"trace_id": rec["trace_id"], "session": rec["session"],
+                            "events": len(rec["events"])}
+                self.bus.publish("experience.recorded", {"trace_id": rec["trace_id"]})
+            except Exception as exc:  # noqa: BLE001 - enregistrement best-effort
+                self.bus.publish("experience.record_failed", {"detail": str(exc)})
+
+        return {
+            "ok": bool(response.get("ok")),
+            "query": query,
+            "intent": response.get("intent"),
+            "agents": [a.get("id") for a in response.get("agents", [])],
+            "governance": {"doctrines": len(response.get("governance", {}).get("doctrines", [])),
+                           "adrs": len(response.get("governance", {}).get("adrs", []))},
+            "runtime": {"kind": response.get("runtime", {}).get("kind"),
+                        "status": response.get("runtime", {}).get("status")},
+            "synthesis": response.get("synthesis"),
+            "provider": response.get("provider", {}).get("selected"),
+            "recorded": recorded,
+            "response": response,
         }
 
 

@@ -27,6 +27,28 @@ scc-brainai start
 BrainAI READY
 ```
 
+## Traiter une demande de bout en bout
+
+```bash
+scc-brainai run "Quelles doctrines gouvernent la gouvernance ?"
+scc-brainai run "analyse l architecture" --deep     # passe cognitive complète (5 moteurs)
+scc-brainai run "..." --no-record --json            # sans mémorisation ; sortie JSON
+```
+
+`run` démarre BrainAI si besoin, délègue la demande au **Kernel (10)**, puis
+**mémorise l'expérience dans Memory (11)** — la boucle vécu → mémoire :
+
+```
+intention   : governance
+agents      : SCC-AGENT-0002, SCC-AGENT-0003, SCC-AGENT-0001, SCC-AGENT-0020
+gouvernance : 13 doctrine(s), 5 ADR
+runtime     : echo -> succeeded
+mémorisé    : trace mem_000000000008 (7 événements)
+
+--- synthèse ---
+(cognition déterministe de BrainAI, sans IA externe)
+```
+
 ## Séquence de démarrage (les 8 étapes)
 
 1. **Configuration** — charge `config/brainai.json` (scc_root, `as_of`, premiers agents).

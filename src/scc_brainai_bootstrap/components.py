@@ -89,4 +89,23 @@ class KnowledgeComponent:
             return {"name": self.name, "ready": False, "detail": str(exc)}
 
 
-__all__ = ["ControlPlaneComponent", "MemoryComponent", "KnowledgeComponent"]
+class KernelComponent:
+    name = "kernel"
+
+    def __init__(self, config: BrainAIConfig):
+        self._config = config
+        self.kernel = None
+
+    def init(self) -> Dict[str, Any]:
+        if not _add_path(self._config.kernel_src):
+            return {"name": self.name, "ready": False, "detail": "src introuvable"}
+        try:
+            self.kernel = importlib.import_module("scc_brainai").BrainAIKernel()
+            providers = self.kernel.providers.available()
+            return {"name": self.name, "ready": True,
+                    "detail": f"providers={providers}", "data": {"providers": providers}}
+        except Exception as exc:  # noqa: BLE001
+            return {"name": self.name, "ready": False, "detail": str(exc)}
+
+
+__all__ = ["ControlPlaneComponent", "MemoryComponent", "KnowledgeComponent", "KernelComponent"]

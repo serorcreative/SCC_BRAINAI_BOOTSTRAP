@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scc-brainai-bootstrap"
-version = "0.1.0"
+version = "0.2.0"
 description = "Bootstrap de BrainAI — premier exécutable de démarrage : config, Control Plane, Patrimony, Memory, Knowledge, Event Bus, premiers Agents, puis 'BrainAI READY'. Stdlib pur, déterministe, sans réseau."
 readme = "README.md"
 requires-python = ">=3.9"
