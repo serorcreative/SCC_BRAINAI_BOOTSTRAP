@@ -494,6 +494,7 @@ class BrainAIBootstrap:
         session = self.session.summary()
         caps = self.agents.capabilities()
         open_decisions = self._read_open_decisions()
+        executable_decisions = self._read_executable_decisions()
         learnings = self._read_learnings_overview()
         recent_events = self._read_recent_events(limit=10)
         recommendation = self._recommend_next_action(diag, session, open_decisions, learnings)
@@ -507,6 +508,7 @@ class BrainAIBootstrap:
                        "namespaces": self.agents.namespaces()},
             "capabilities": {"count": len(caps), "index": caps},
             "open_decisions": open_decisions,
+            "executable_decisions": executable_decisions,
             "learnings": learnings,
             "recent_events": recent_events,
             "diagnostics": {"verdict": diag["verdict"], "issues": diag["issues"]},
@@ -524,6 +526,24 @@ class BrainAIBootstrap:
         return [{"id": r["id"], "subject": r.get("request", {}).get("subject", ""),
                  "class": r.get("qualification", {}).get("class"), "status": r["status"]}
                 for r in records]
+
+    def _read_executable_decisions(self) -> List[Dict[str, Any]]:
+        """Décisions **validées et non encore exécutées** — actuellement **éligibles à une
+        demande d'exécution** selon l'état autoritatif reflété (lecture seule).
+
+        Le cerveau **revalide toujours les préconditions au moment de l'action** ; ceci n'est
+        **aucune règle nouvelle**, seulement le reflet de l'état ``validated`` ∧
+        ``execution_status == "not_executed"`` (miroir de ``_read_open_decisions``)."""
+        try:
+            if not self.cognition.available():
+                return []
+            records = self.cognition.decision.search(status="validated")
+        except Exception:  # noqa: BLE001
+            return []
+        return [{"id": r["id"], "subject": r.get("request", {}).get("subject", ""),
+                 "class": r.get("qualification", {}).get("class"), "status": r["status"]}
+                for r in records
+                if r.get("execution_manifest", {}).get("execution_status") == "not_executed"]
 
     def _read_learnings_overview(self) -> Dict[str, Any]:
         """Apprentissages **proposés** et **validés** (lecture seule ; pas d'analyse)."""
