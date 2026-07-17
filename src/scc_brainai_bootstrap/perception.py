@@ -104,6 +104,19 @@ class PerceptionService:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
         return entry
 
+    def record_text(self, *, text: str, provenance: Dict[str, Any]) -> Dict[str, Any]:
+        """Acquisition d'une **Entrée texte** (INPUT-WRITE-001). **Normalise** le texte —
+        trim des espaces de bord, **aucune interprétation, aucune perte de sens** — puis
+        enregistre une Entrée canonique de modalité ``text`` via :meth:`record` (append-only,
+        id adressé-contenu, ``as_of`` figé, provenance conservée). Refuse un texte vide ou une
+        provenance invalide (validations portées par :func:`build_input`)."""
+        if not isinstance(text, str):
+            raise ValueError("text requis (str)")
+        normalized = text.strip()
+        if not normalized:
+            raise ValueError("text vide après normalisation")
+        return self.record(modality="text", content=normalized, provenance=provenance)
+
     # -- lecture ------------------------------------------------------------ #
     def _load_all(self) -> List[Dict[str, Any]]:
         p = self.path

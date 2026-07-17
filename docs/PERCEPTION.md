@@ -57,6 +57,19 @@ Store **append-only** (`data/inputs.jsonl`) porté par un **collaborateur dédi�
 immuables ; on n'en modifie ni n'en supprime aucune. `record()` est **idempotent par id**
 (adressage-contenu).
 
+## Écriture — première acquisition (INPUT-WRITE-001)
+
+Une **unique action** enregistre une Entrée **texte** :
+
+| Opération | Genre | Effet |
+|---|---|---|
+| `record_input` | `action` | normalise le texte (trim des bords, **sans interprétation ni perte de sens**), crée l'Entrée canonique `modality:"text"`, l'ajoute (append-only, id adressé-contenu, `as_of` figé, provenance conservée). Renvoie `{ok, input_id, input}` ; texte vide / provenance invalide → `{ok:false, error}`. |
+
+Paramètres **strictement nécessaires** : `text` + `provenance`. Le Bootstrap **délègue
+entièrement** à `PerceptionService.record_text` ; la Présentation est un simple passthrough.
+Un événement `input.recorded` est publié (observabilité). **Aucune** interprétation,
+enrichissement, décision ni apprentissage. Une seule modalité : le texte.
+
 ## Lectures du Contrat (additives, v1.0)
 
 | Opération | Genre | Effet |

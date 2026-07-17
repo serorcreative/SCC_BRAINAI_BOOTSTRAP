@@ -120,5 +120,8 @@ class Presentation:
         return self._wrap("validate_learning",
                           self._boot.validate_learning(item_id, approver, reason, action=action))
 
+    def record_input(self, text: str, provenance: Dict[str, Any]) -> Dict[str, Any]:
+        return self._wrap("record_input", self._boot.record_input(text, provenance))
+
 
 __all__ = ["Presentation"]

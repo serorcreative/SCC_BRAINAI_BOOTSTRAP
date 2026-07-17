@@ -604,6 +604,23 @@ class BrainAIBootstrap:
             return {"ok": False, "error": f"Entrée introuvable : {input_id}"}
         return entry
 
+    def record_input(self, text: str, provenance: Dict[str, Any]) -> Dict[str, Any]:
+        """Enregistre une **Entrée texte** — première acquisition officielle (INPUT-WRITE-001).
+
+        Délègue **entièrement** au pilier Perception (normalisation, création canonique
+        immuable, ajout append-only, provenance et ``as_of`` conservés). **Aucune** logique
+        métier supplémentaire : aucune interprétation, aucun enrichissement, aucune décision,
+        aucun apprentissage. Renvoie ``{ok:True, input_id, input}`` ; un texte vide ou une
+        provenance invalide sont **reflétés** en ``{ok:False, error}`` (jamais fabriqués)."""
+        try:
+            entry = self.perception.record_text(text=text, provenance=provenance)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        self.bus.publish("input.recorded",
+                         {"input_id": entry["id"], "modality": entry["modality"]})
+        self._persist_events()
+        return {"ok": True, "input_id": entry["id"], "input": entry}
+
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
         path = self.events_path

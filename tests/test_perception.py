@@ -154,3 +154,72 @@ def test_presentation_passthrough(boot):
     assert detail["kind"] == "read" and detail["data"] == e
     unknown = present.input("in_inexistante")
     assert unknown["data"]["ok"] is False and "error" in unknown["data"]
+
+
+# --------------------------------------------------------------------- #
+# Écriture — première acquisition d'une Entrée texte (INPUT-WRITE-001)
+# --------------------------------------------------------------------- #
+PROV = {"origin": "test", "medium": "inline"}
+
+
+def test_record_text_normalizes_and_creates(config):
+    svc = PerceptionService(config)
+    e = svc.record_text(text="  Bonjour BrainAI  ", provenance=PROV)
+    assert e["modality"] == "text"
+    assert e["content"] == "Bonjour BrainAI"                  # trim des bords, sans perte de sens
+    assert e["id"].startswith("in_")
+    assert svc.read(e["id"]) == e                             # lecture immédiate
+
+
+def test_record_text_rejects_invalid(config):
+    svc = PerceptionService(config)
+    for bad in ("", "   ", "\n\t "):
+        try:
+            svc.record_text(text=bad, provenance=PROV)
+            assert False, "un texte vide aurait dû être refusé"
+        except ValueError:
+            pass
+    try:
+        svc.record_text(text="ok", provenance={})            # provenance vide → refus
+        assert False, "une provenance vide aurait dû être refusée"
+    except ValueError:
+        pass
+
+
+def test_record_text_append_only_and_deterministic(config):
+    svc = PerceptionService(config)
+    a = svc.record_text(text="Fait A", provenance=PROV)
+    svc.record_text(text="Fait B", provenance=PROV)
+    again = svc.record_text(text="Fait A", provenance=PROV)   # identique → idempotent
+    assert again["id"] == a["id"]                             # id déterministe
+    lines = [l for l in svc.path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert len(lines) == 2                                    # append-only, aucun doublon
+
+
+def test_bootstrap_record_input_end_to_end(boot):
+    res = boot.record_input("Première Entrée officielle", PROV)
+    assert res["ok"] is True and res["input_id"].startswith("in_")
+    iid = res["input_id"]
+    assert boot.input(iid)["id"] == iid                       # lecture immédiate via `input`
+    assert iid in [i["id"] for i in boot.inputs()["items"]]   # apparition dans `inputs`
+    ov = boot.overview()["inputs"]
+    assert ov["count"] >= 1 and iid in [i["id"] for i in ov["items"]]   # apparition dans overview
+
+
+def test_bootstrap_record_input_rejects_invalid(boot):
+    assert boot.record_input("   ", PROV)["ok"] is False      # texte vide
+    assert boot.record_input("ok", {})["ok"] is False         # provenance invalide
+
+
+def test_bootstrap_record_input_is_immutable(boot):
+    iid = boot.record_input("Immuable ?", PROV)["input_id"]
+    got = boot.input(iid)
+    got["content"] = "ALTÉRÉ"                                 # mutation côté appelant
+    assert boot.input(iid)["content"] == "Immuable ?"         # le store reste intact
+
+
+def test_presentation_record_input_passthrough(boot):
+    present = Presentation(bootstrap=boot)
+    env = present.record_input(text="Via présentation", provenance=PROV)
+    assert env["operation"] == "record_input" and env["kind"] == "action"
+    assert env["data"]["ok"] is True and env["data"]["input_id"].startswith("in_")
