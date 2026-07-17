@@ -28,6 +28,8 @@ OPERATIONS: Dict[str, Dict[str, str]] = {
     "status": {"kind": "read", "summary": "Patrimoine et disponibilité"},
     "learnings": {"kind": "read", "summary": "Apprentissages proposés / validés"},
     "events": {"kind": "read", "summary": "Journal d'événements"},
+    "inputs": {"kind": "read", "summary": "Entrées perçues (liste projetée)"},
+    "input": {"kind": "read", "summary": "Détail d'une Entrée par identifiant"},
     "start": {"kind": "action", "summary": "Démarrer BrainAI"},
     "run": {"kind": "action", "summary": "Traiter une demande (routage auto)"},
     "decide": {"kind": "action", "summary": "Formaliser une décision candidate"},

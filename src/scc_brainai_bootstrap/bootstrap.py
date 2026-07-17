@@ -43,6 +43,7 @@ from scc_brainai_bootstrap.doctor import Doctor
 from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.learning import LearningLayer
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
+from scc_brainai_bootstrap.perception import PerceptionService
 from scc_brainai_bootstrap import router
 from scc_brainai_bootstrap.session import SessionStore
 from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
@@ -83,6 +84,9 @@ class BrainAIBootstrap:
         self._register_adapters()
         self.capability_resolver = CapabilityResolver(self.agents, self.adapters)
         self.session = SessionStore(self.config)
+        # Pilier Perception — socle de lecture des Entrées (fait acquis normalisé, immuable).
+        # Le Bootstrap délègue toute la logique d'entrée à ce collaborateur dédié.
+        self.perception = PerceptionService(self.config)
         self._session_state = None
         self._booted = False
 
@@ -509,6 +513,7 @@ class BrainAIBootstrap:
             "capabilities": {"count": len(caps), "index": caps},
             "open_decisions": open_decisions,
             "executable_decisions": executable_decisions,
+            "inputs": self._read_inputs_overview(),
             "learnings": learnings,
             "recent_events": recent_events,
             "diagnostics": {"verdict": diag["verdict"], "issues": diag["issues"]},
@@ -563,6 +568,14 @@ class BrainAIBootstrap:
             return {"count": len(items), "items": top}
         return {"proposed": summarize("proposed"), "validated": summarize("validated")}
 
+    def _read_inputs_overview(self, limit: int = 5) -> Dict[str, Any]:
+        """Entrées perçues — projection minimale pour l'overview (lecture seule).
+
+        Délègue au pilier Perception ; ne fabrique, ne normalise, ni n'analyse rien. Une
+        Entrée reste un **fait observé** : jamais une connaissance ni une décision."""
+        items = self.perception.project()
+        return {"count": len(items), "items": items[:limit]}
+
     def status_summary(self) -> Dict[str, Any]:
         """Patrimoine et disponibilité des sous-systèmes (lecture seule, sans démarrer)."""
         return {
@@ -575,6 +588,21 @@ class BrainAIBootstrap:
                 "agents_catalog": self.config.agents_dir.exists(),
             },
         }
+
+    def inputs(self) -> Dict[str, Any]:
+        """Entrées perçues — **liste projetée** (lecture seule). Délègue au pilier Perception ;
+        n'écrit rien, ne démarre pas BrainAI. Une Entrée est un fait observé, jamais un acteur."""
+        items = self.perception.project()
+        return {"count": len(items), "items": items}
+
+    def input(self, input_id: str) -> Dict[str, Any]:
+        """Détail d'une **Entrée** par identifiant (lecture seule). Renvoie l'Entrée telle
+        quelle, ou un reflet d'erreur ``{ok: False, error}`` si l'identifiant est inconnu —
+        jamais fabriqué, jamais simulé (aucun enrichissement cognitif n'existe à ce stade)."""
+        entry = self.perception.read(input_id)
+        if entry is None:
+            return {"ok": False, "error": f"Entrée introuvable : {input_id}"}
+        return entry
 
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""

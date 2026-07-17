@@ -34,7 +34,7 @@ def test_contract_lists_expected_operations():
     reads = {k for k, v in OPERATIONS.items() if v["kind"] == "read"}
     actions = {k for k, v in OPERATIONS.items() if v["kind"] == "action"}
     assert {"overview", "doctor", "session", "agents", "capabilities",
-            "resolve", "status", "learnings", "events"} <= reads
+            "resolve", "status", "learnings", "events", "inputs", "input"} <= reads
     assert {"run", "decide", "plan", "validate_decision", "execute_decision",
             "learn", "validate_learning", "start"} <= actions
 
