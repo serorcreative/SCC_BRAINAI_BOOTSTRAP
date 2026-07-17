@@ -276,3 +276,66 @@ def test_presentation_analyze_input_passthrough(boot):
     env = present.analyze_input(iid)
     assert env["operation"] == "analyze_input" and env["kind"] == "action"
     assert env["data"]["ok"] is True and env["data"]["analysis"]["deliberation_id"]
+
+
+# --------------------------------------------------------------------- #
+# Histoire événementielle d'une Entrée (INPUT-HISTORY-001)
+# --------------------------------------------------------------------- #
+def test_input_history_returns_events_in_order(boot):
+    iid = boot.record_input("À historiser ?", PROV)["input_id"]
+    boot.analyze_input(iid)
+    hist = boot.input_history(iid)
+    assert hist["input_id"] == iid
+    topics = [e["topic"] for e in hist["events"]]
+    assert "input.recorded" in topics and "input.analyzed" in topics
+    assert topics.index("input.recorded") < topics.index("input.analyzed")   # chronologique
+    for e in hist["events"]:                                # schéma réel réutilisé (pas de nouveau format)
+        assert {"seq", "topic", "timestamp", "payload"} <= set(e.keys())
+        assert e["payload"]["input_id"] == iid
+
+
+def test_input_history_unknown_reflects_error(boot):
+    res = boot.input_history("in_inexistante")
+    assert res["ok"] is False and "error" in res            # convention des lectures (cf. input)
+
+
+def test_input_history_filters_strictly_by_input_id(boot):
+    a = boot.record_input("Entrée A", PROV)["input_id"]
+    b = boot.record_input("Entrée B", PROV)["input_id"]
+    boot.analyze_input(a)
+    hist_b = boot.input_history(b)
+    assert all(e["payload"]["input_id"] == b for e in hist_b["events"])
+    assert a not in [e["payload"].get("input_id") for e in hist_b["events"]]
+
+
+def test_input_history_repeated_analyses_not_deduped(boot):
+    iid = boot.record_input("Analyses répétées", PROV)["input_id"]
+    boot.analyze_input(iid)
+    boot.analyze_input(iid)
+    analyzed = [e for e in boot.input_history(iid)["events"] if e["topic"] == "input.analyzed"]
+    assert len(analyzed) == 2                                # distinct, jamais dédupliqué ni mué en état
+
+
+def test_input_history_known_entry_without_events(config):
+    b = BrainAIBootstrap(config=config)
+    e = b.perception.record(**SAMPLE)                        # créée via le service : aucun événement publié
+    assert b.input_history(e["id"]) == {"input_id": e["id"], "events": []}   # histoire vide, normale
+
+
+def test_input_history_is_read_only(boot):
+    iid = boot.record_input("Journal intact", PROV)["input_id"]
+    before = boot.journal()["count"]
+    boot.input_history(iid)
+    boot.input_history(iid)
+    assert boot.journal()["count"] == before                # aucune écriture au journal
+    assert boot.input(iid)["content"] == "Journal intact"   # Entrée intacte
+
+
+def test_presentation_input_history_passthrough(boot):
+    iid = boot.record_input("Via présentation", PROV)["input_id"]
+    present = Presentation(bootstrap=boot)
+    env = present.input_history(iid)
+    assert env["operation"] == "input_history" and env["kind"] == "read"
+    assert env["data"] == boot.input_history(iid)           # délégation verbatim
+    unknown = present.input_history("in_inexistante")
+    assert unknown["data"]["ok"] is False and "error" in unknown["data"]

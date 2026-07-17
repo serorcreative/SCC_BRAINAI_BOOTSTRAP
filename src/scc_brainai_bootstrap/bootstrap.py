@@ -659,6 +659,23 @@ class BrainAIBootstrap:
             },
         }
 
+    def input_history(self, input_id: str) -> Dict[str, Any]:
+        """Histoire événementielle d'une **Entrée** (INPUT-HISTORY-001) — **lecture seule**.
+
+        Restitue, dans l'**ordre chronologique déterministe** (ordre d'ajout / ``seq``), les
+        événements du **journal append-only existant** reliés à cette Entrée
+        (``payload.input_id == input_id``), **tels quels** (schéma réel : ``seq/topic/actor/
+        timestamp/payload``). **Aucune** mutation du journal ni de l'Entrée, aucun état, aucune
+        projection, aucune déduplication, aucun nouveau format. Un ``input_id`` inconnu renvoie
+        ``{ok:False, error}`` (convention des lectures, cf. :meth:`input`) ; une Entrée connue
+        sans événement renvoie normalement son histoire (``events: []``)."""
+        if self.perception.read(input_id) is None:
+            return {"ok": False, "error": f"Entrée introuvable : {input_id}"}
+        events = [e for e in self.journal()["events"]
+                  if isinstance(e.get("payload"), dict)
+                  and e["payload"].get("input_id") == input_id]
+        return {"input_id": input_id, "events": events}
+
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
         path = self.events_path

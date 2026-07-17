@@ -90,9 +90,22 @@ n'est **pas** persisté comme enrichissement de l'Entrée. Événement `input.an
 |---|---|---|
 | `inputs` | `read` | liste **projetée** des Entrées (`{count, items}`) — légère, déterministe |
 | `input` | `read` | détail d'une Entrée par identifiant ; id inconnu → reflet `{ok:false, error}` |
+| `input_history` | `read` | **histoire événementielle** d'une Entrée (`{input_id, events}`) ; id inconnu → `{ok:false, error}` |
 
 Une **projection minimale** des Entrées est aussi présente dans `overview.inputs`
 (`{count, items}`, plafonnée), en lecture seule.
+
+## Cycle de vie = événements (INPUT-HISTORY-001)
+
+L'Entrée **n'a aucun état mutable** et **aucune machine à états** : son cycle de vie **est**
+le **journal append-only existant** (approche D+C). `input_history(input_id)` restitue, en
+**lecture seule** et dans l'**ordre chronologique déterministe** (`seq`), les événements du
+journal reliés à l'Entrée (`payload.input_id == input_id`) — **tels quels** (schéma réel
+`seq/topic/actor/timestamp/payload`, réutilisé sans nouveau format). Aucune mutation, aucune
+déduplication, aucun label synthétique (`analyzed`/`available`/…). Les analyses répétées
+apparaissent comme **plusieurs** `input.analyzed` distincts. Si un état devient un jour
+nécessaire, il sera une **projection** calculée depuis cette histoire — jamais un champ porté
+par l'Entrée.
 
 ## Politique d'exposition (Transport)
 
