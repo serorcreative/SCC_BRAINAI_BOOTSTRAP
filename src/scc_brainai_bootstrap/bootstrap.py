@@ -621,6 +621,44 @@ class BrainAIBootstrap:
         self._persist_events()
         return {"ok": True, "input_id": entry["id"], "input": entry}
 
+    def analyze_input(self, input_id: str) -> Dict[str, Any]:
+        """Première **analyse cognitive** d'une Entrée (INPUT-ANALYZE-001).
+
+        Récupère l'Entrée officielle, puis fait **circuler son contenu dans le pipeline cognitif
+        existant** — Reasoning seul (déterministe, **sans aucune IA/LLM**) via
+        ``cognition.reasoning.reason``. Le Bootstrap **orchestre et délègue** ; aucune logique
+        cognitive ici. **Aucune** mutation de l'Entrée, aucun enrichissement définitif, aucune
+        écriture en Mémoire, aucun apprentissage, **aucune décision** (le moteur Decision n'est
+        jamais appelé) et aucune exécution. Le résultat est un **reflet d'analyse transitoire**
+        (délibération candidate), jamais gouverné. Id inconnu → ``{ok:False, error}``."""
+        entry = self.perception.read(input_id)
+        if entry is None:
+            return {"ok": False, "error": f"Entrée introuvable : {input_id}"}
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        delib = self.cognition.reasoning.reason(entry["content"])
+        self.bus.publish("input.analyzed",
+                         {"input_id": input_id, "deliberation_id": delib.get("id")})
+        self._persist_events()
+        return {
+            "ok": True,
+            "input_id": input_id,
+            "analysis": {
+                "deliberation_id": delib.get("id"),
+                "provider": delib.get("provider"),
+                "as_of": delib.get("as_of"),
+                "elements": {
+                    "facts": len(delib.get("facts", [])),
+                    "hypotheses": len(delib.get("hypotheses", [])),
+                    "options": len(delib.get("options", [])),
+                    "risks": len(delib.get("risks", [])),
+                    "inferences": len(delib.get("inferences", [])),
+                },
+                # Reasoning produit une recommandation CANDIDATE ; aucune décision gouvernée n'est créée.
+                "recommendation_status": delib.get("decision", {}).get("status"),
+            },
+        }
+
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
         path = self.events_path

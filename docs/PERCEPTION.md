@@ -70,6 +70,20 @@ entièrement** à `PerceptionService.record_text` ; la Présentation est un simp
 Un événement `input.recorded` est publié (observabilité). **Aucune** interprétation,
 enrichissement, décision ni apprentissage. Une seule modalité : le texte.
 
+## Analyse — première circulation dans le cerveau (INPUT-ANALYZE-001)
+
+Une **action** fait circuler une Entrée existante dans le pipeline cognitif **existant** :
+
+| Opération | Genre | Effet |
+|---|---|---|
+| `analyze_input` | `action` | récupère l'Entrée (`input_id`), fait délibérer **Reasoning seul** (déterministe, **sans IA/LLM**) sur son contenu, et renvoie un **reflet d'analyse transitoire** `{deliberation_id, provider, as_of, elements, recommendation_status}`. Id inconnu → `{ok:false, error}`. |
+
+Le Bootstrap **orchestre et délègue** (`cognition.reasoning.reason`) ; aucune logique cognitive
+dans le Bootstrap. **Aucune** mutation de l'Entrée, aucun enrichissement définitif, aucune
+écriture en **Mémoire**, aucun apprentissage, **aucune décision** gouvernée (le moteur Decision
+n'est jamais appelé), aucune exécution. La recommandation reste **candidate** ; le résultat
+n'est **pas** persisté comme enrichissement de l'Entrée. Événement `input.analyzed` (observabilité).
+
 ## Lectures du Contrat (additives, v1.0)
 
 | Opération | Genre | Effet |

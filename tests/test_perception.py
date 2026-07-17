@@ -223,3 +223,56 @@ def test_presentation_record_input_passthrough(boot):
     env = present.record_input(text="Via présentation", provenance=PROV)
     assert env["operation"] == "record_input" and env["kind"] == "action"
     assert env["data"]["ok"] is True and env["data"]["input_id"].startswith("in_")
+
+
+# --------------------------------------------------------------------- #
+# Analyse — première circulation d'une Entrée dans le cerveau (INPUT-ANALYZE-001)
+# --------------------------------------------------------------------- #
+def test_analyze_input_runs_reasoning(boot):
+    iid = boot.record_input("Faut-il préparer la première interface ?", PROV)["input_id"]
+    res = boot.analyze_input(iid)
+    assert res["ok"] is True
+    assert res["input_id"] == iid
+    assert res["analysis"]["deliberation_id"]                 # une délibération a été produite
+    assert isinstance(res["analysis"]["elements"], dict)
+
+
+def test_analyze_input_unknown_reflects_error(boot):
+    res = boot.analyze_input("in_inexistante")
+    assert res["ok"] is False and "error" in res
+
+
+def test_analyze_input_does_not_mutate_entry(boot):
+    iid = boot.record_input("Contenu à préserver", PROV)["input_id"]
+    boot.analyze_input(iid)
+    assert boot.input(iid)["content"] == "Contenu à préserver"   # Entrée intacte après analyse
+
+
+def test_analyze_input_writes_no_memory(boot):
+    iid = boot.record_input("Analyse sans mémoire", PROV)["input_id"]
+    boot.analyze_input(iid)
+    store = boot.memory.store
+    # l'analyse ne persiste RIEN en Mémoire (le store reste vide, ou n'est pas alimenté).
+    assert store is None or sum(store.counts().values()) == 0
+
+
+def test_analyze_input_creates_no_decision_no_execution(boot):
+    iid = boot.record_input("Analyse sans décision", PROV)["input_id"]
+    boot.analyze_input(iid)
+    # aucune Décision gouvernée créée (le moteur Decision n'a jamais été appelé)
+    assert boot.cognition.decision.search() == []
+    assert boot.overview()["open_decisions"] == []
+    assert boot.overview()["executable_decisions"] == []
+    # aucune Exécution, aucun apprentissage, aucune Décision côté événements
+    topics = {e["topic"] for e in boot.recorder.events}
+    assert "input.analyzed" in topics
+    assert not any(t.startswith("decision.") or t.startswith("execution.")
+                   or t.startswith("learn") for t in topics)
+
+
+def test_presentation_analyze_input_passthrough(boot):
+    iid = boot.record_input("Via présentation", PROV)["input_id"]
+    present = Presentation(bootstrap=boot)
+    env = present.analyze_input(iid)
+    assert env["operation"] == "analyze_input" and env["kind"] == "action"
+    assert env["data"]["ok"] is True and env["data"]["analysis"]["deliberation_id"]

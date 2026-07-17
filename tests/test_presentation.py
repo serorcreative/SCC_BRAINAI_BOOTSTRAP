@@ -36,7 +36,7 @@ def test_contract_lists_expected_operations():
     assert {"overview", "doctor", "session", "agents", "capabilities",
             "resolve", "status", "learnings", "events", "inputs", "input"} <= reads
     assert {"run", "decide", "plan", "validate_decision", "execute_decision",
-            "learn", "validate_learning", "start", "record_input"} <= actions
+            "learn", "validate_learning", "start", "record_input", "analyze_input"} <= actions
 
 
 def test_envelope_shape(boot):

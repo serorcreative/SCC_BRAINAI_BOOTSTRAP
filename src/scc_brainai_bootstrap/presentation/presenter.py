@@ -123,5 +123,8 @@ class Presentation:
     def record_input(self, text: str, provenance: Dict[str, Any]) -> Dict[str, Any]:
         return self._wrap("record_input", self._boot.record_input(text, provenance))
 
+    def analyze_input(self, input_id: str) -> Dict[str, Any]:
+        return self._wrap("analyze_input", self._boot.analyze_input(input_id))
+
 
 __all__ = ["Presentation"]
