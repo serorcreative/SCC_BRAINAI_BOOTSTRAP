@@ -637,6 +637,19 @@ class BrainAIBootstrap:
         if not self.cognition.available():
             return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
         delib = self.cognition.reasoning.reason(entry["content"])
+
+        # Projection **fidèle** de la substance, dérivée EXCLUSIVEMENT de la délibération produite
+        # pendant cet appel — aucun second calcul, aucune reformulation, aucun `reasoning.get()`.
+        # Sélection ``{id, statement, sources}`` : la projection que le moteur définit déjà lui-même
+        # (``explanation.stmts``) — aucune fuite d'implémentation (ni ``hash``/``data``/``tags``).
+        # La délibération **persistée** reste l'unique source de vérité ; ceci n'en est qu'un reflet
+        # (traçable via ``deliberation_id``/``provider``/``as_of``), non persisté.
+        def _statements(items):
+            return [{"id": e.get("id"), "statement": e.get("statement"),
+                     "sources": list(e.get("sources", []) or [])}
+                    for e in (items or [])]
+
+        reco = (delib.get("explanation", {}) or {}).get("recommendation", {}) or {}
         self.bus.publish("input.analyzed",
                          {"input_id": input_id, "deliberation_id": delib.get("id")})
         self._persist_events()
@@ -648,13 +661,17 @@ class BrainAIBootstrap:
                 "provider": delib.get("provider"),
                 "as_of": delib.get("as_of"),
                 "elements": {
-                    "facts": len(delib.get("facts", [])),
-                    "hypotheses": len(delib.get("hypotheses", [])),
-                    "options": len(delib.get("options", [])),
-                    "risks": len(delib.get("risks", [])),
-                    "inferences": len(delib.get("inferences", [])),
+                    "facts": _statements(delib.get("facts")),
+                    "hypotheses": _statements(delib.get("hypotheses")),
+                    "options": _statements(delib.get("options")),
+                    "risks": _statements(delib.get("risks")),
+                    "inferences": _statements(delib.get("inferences")),
                 },
-                # Reasoning produit une recommandation CANDIDATE ; aucune décision gouvernée n'est créée.
+                # Recommandation CANDIDATE, projetée verbatim ; aucune décision gouvernée n'est créée.
+                "recommendation": {
+                    "statement": reco.get("statement", ""),
+                    "requires_human_validation": bool(reco.get("requires_human_validation", True)),
+                },
                 "recommendation_status": delib.get("decision", {}).get("status"),
             },
         }

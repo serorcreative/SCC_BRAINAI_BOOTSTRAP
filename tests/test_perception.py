@@ -233,8 +233,48 @@ def test_analyze_input_runs_reasoning(boot):
     res = boot.analyze_input(iid)
     assert res["ok"] is True
     assert res["input_id"] == iid
-    assert res["analysis"]["deliberation_id"]                 # une délibération a été produite
-    assert isinstance(res["analysis"]["elements"], dict)
+    analysis = res["analysis"]
+    assert analysis["deliberation_id"]                        # une délibération a été produite
+    assert analysis["provider"] and analysis["as_of"]         # traçabilité présente
+    elements = analysis["elements"]
+    assert set(elements) == {"facts", "hypotheses", "options", "risks", "inferences"}
+    # OUTPUT-001 : chaque catégorie est une LISTE d'énoncés {id, statement, sources}
+    # (substance projetée, plus des compteurs).
+    for cat in elements.values():
+        assert isinstance(cat, list)
+        for item in cat:
+            assert set(item) == {"id", "statement", "sources"}
+            assert isinstance(item["statement"], str)
+            assert isinstance(item["sources"], list)
+
+
+def test_analyze_input_reflects_candidate_recommendation(boot):
+    iid = boot.record_input("Faut-il préparer la première interface ?", PROV)["input_id"]
+    reco = boot.analyze_input(iid)["analysis"]["recommendation"]
+    assert "statement" in reco
+    assert reco["requires_human_validation"] is True          # proposition, jamais appliquée seule
+    # la recommandation reste candidate (aucune décision gouvernée)
+    assert boot.analyze_input(iid)["analysis"]["recommendation_status"] == "candidate"
+
+
+def test_analyze_input_event_carries_only_pointer(boot):
+    # Source de vérité UNIQUE : l'événement ne porte QUE {input_id, deliberation_id} — aucune
+    # substance dupliquée dans le journal (aucune seconde source de vérité).
+    iid = boot.record_input("Analyse sans duplication", PROV)["input_id"]
+    boot.analyze_input(iid)
+    ev = [e for e in boot.recorder.events if e["topic"] == "input.analyzed"][-1]
+    assert set(ev["payload"]) == {"input_id", "deliberation_id"}
+
+
+def test_analyze_input_is_deterministic_no_divergence(boot):
+    # Re-analyser la même Entrée redonne le MÊME deliberation_id (adressé-contenu) et la MÊME
+    # substance : le reflet ne peut pas diverger de la source persistée.
+    iid = boot.record_input("Même contenu, même délibération", PROV)["input_id"]
+    a = boot.analyze_input(iid)["analysis"]
+    b = boot.analyze_input(iid)["analysis"]
+    assert a["deliberation_id"] == b["deliberation_id"]
+    assert a["elements"] == b["elements"]
+    assert a["recommendation"] == b["recommendation"]
 
 
 def test_analyze_input_unknown_reflects_error(boot):
