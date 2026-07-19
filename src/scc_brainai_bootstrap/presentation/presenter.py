@@ -88,6 +88,9 @@ class Presentation:
     def input_history(self, input_id: str) -> Dict[str, Any]:
         return self._wrap("input_history", self._boot.input_history(input_id))
 
+    def input_analysis(self, input_id: str) -> Dict[str, Any]:
+        return self._wrap("input_analysis", self._boot.input_analysis(input_id))
+
     def journal_exists(self) -> bool:
         """Helper de lecture : le journal persistant existe-t-il ? (sans démarrer)."""
         return self._boot.events_path.exists()

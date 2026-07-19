@@ -319,6 +319,58 @@ def test_presentation_analyze_input_passthrough(boot):
 
 
 # --------------------------------------------------------------------- #
+# Analyse revisitable d'une Entrée (INPUT-ANALYSIS-READ-001)
+# --------------------------------------------------------------------- #
+def test_input_analysis_reopens_exact_persisted_analysis(boot):
+    iid = boot.record_input("Faut-il préparer la première interface ?", PROV)["input_id"]
+    analyzed = boot.analyze_input(iid)                       # produit + persiste
+    reread = boot.input_analysis(iid)                        # relit, sans recalcul
+    assert reread["ok"] is True and reread["input_id"] == iid
+    # Projection OFFICIELLE UNIQUE : la relecture == le reflet d'analyse, à l'identique.
+    assert reread["analysis"] == analyzed["analysis"]
+    assert reread["analysis"]["deliberation_id"] == analyzed["analysis"]["deliberation_id"]
+
+
+def test_input_analysis_is_read_only_no_event_no_recompute(boot):
+    iid = boot.record_input("Lecture sans effet de bord", PROV)["input_id"]
+    boot.analyze_input(iid)
+    before = [e for e in boot.recorder.events if e["topic"] == "input.analyzed"]
+    boot.input_analysis(iid)
+    after = [e for e in boot.recorder.events if e["topic"] == "input.analyzed"]
+    assert len(after) == len(before)                         # aucune nouvelle analyse, aucun événement
+
+
+def test_input_analysis_unknown_entry_reflects_error(boot):
+    res = boot.input_analysis("in_inexistante")
+    assert res["ok"] is False and "error" in res             # convention des lectures
+
+
+def test_input_analysis_entry_never_analyzed_reflects_error(boot):
+    iid = boot.record_input("Jamais analysée", PROV)["input_id"]
+    res = boot.input_analysis(iid)
+    assert res["ok"] is False and "aucune analyse" in res["error"]
+
+
+def test_input_analysis_resolves_latest_analyzed_event(boot):
+    # Règle explicite : l'analyse officielle = l'événement input.analyzed le plus récent (seq max).
+    iid = boot.record_input("Analyses répétées", PROV)["input_id"]
+    boot.analyze_input(iid)
+    boot.analyze_input(iid)
+    analyzed = [e for e in boot.input_history(iid)["events"] if e["topic"] == "input.analyzed"]
+    latest = max(analyzed, key=lambda e: e["seq"])
+    res = boot.input_analysis(iid)
+    assert res["analysis"]["deliberation_id"] == latest["payload"]["deliberation_id"]
+
+
+def test_presentation_input_analysis_passthrough(boot):
+    iid = boot.record_input("Via présentation", PROV)["input_id"]
+    boot.analyze_input(iid)
+    env = Presentation(bootstrap=boot).input_analysis(iid)
+    assert env["operation"] == "input_analysis" and env["kind"] == "read"
+    assert env["data"]["ok"] is True and env["data"]["analysis"]["deliberation_id"]
+
+
+# --------------------------------------------------------------------- #
 # Histoire événementielle d'une Entrée (INPUT-HISTORY-001)
 # --------------------------------------------------------------------- #
 def test_input_history_returns_events_in_order(boot):

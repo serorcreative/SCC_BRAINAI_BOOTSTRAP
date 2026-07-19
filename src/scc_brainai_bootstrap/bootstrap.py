@@ -51,6 +51,43 @@ from scc_brainai_bootstrap.subscribers import EventRecorder, LifecycleWatcher
 READY_BANNER = "BrainAI READY"
 
 
+def _project_analysis(delib: Dict[str, Any]) -> Dict[str, Any]:
+    """**Projection officielle unique** d'une délibération (INPUT-ANALYSIS-READ-001).
+
+    Toute représentation officielle d'une délibération — ``analyze_input`` (reflet de l'analyse
+    en cours) comme ``input_analysis`` (relecture d'une analyse déjà produite) — provient
+    **obligatoirement de cette fonction**. Sélection **fidèle** ``{id, statement, sources}`` par
+    catégorie + recommandation **candidate** projetée verbatim ; aucune reformulation, aucune
+    fuite d'implémentation (ni ``hash``/``data``/``tags``). ``deliberation_id``/``provider``/
+    ``as_of`` assurent la traçabilité. La délibération **persistée** reste l'unique source de
+    vérité ; ceci n'en est qu'un reflet.
+    """
+    def _statements(items):
+        return [{"id": e.get("id"), "statement": e.get("statement"),
+                 "sources": list(e.get("sources", []) or [])}
+                for e in (items or [])]
+
+    reco = (delib.get("explanation", {}) or {}).get("recommendation", {}) or {}
+    return {
+        "deliberation_id": delib.get("id"),
+        "provider": delib.get("provider"),
+        "as_of": delib.get("as_of"),
+        "elements": {
+            "facts": _statements(delib.get("facts")),
+            "hypotheses": _statements(delib.get("hypotheses")),
+            "options": _statements(delib.get("options")),
+            "risks": _statements(delib.get("risks")),
+            "inferences": _statements(delib.get("inferences")),
+        },
+        # Recommandation CANDIDATE, projetée verbatim ; aucune décision gouvernée n'est créée.
+        "recommendation": {
+            "statement": reco.get("statement", ""),
+            "requires_human_validation": bool(reco.get("requires_human_validation", True)),
+        },
+        "recommendation_status": delib.get("decision", {}).get("status"),
+    }
+
+
 class BrainAIBootstrap:
     def __init__(self, config: Optional[BrainAIConfig] = None):
         self.config = config or load_config()
@@ -637,44 +674,14 @@ class BrainAIBootstrap:
         if not self.cognition.available():
             return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
         delib = self.cognition.reasoning.reason(entry["content"])
-
-        # Projection **fidèle** de la substance, dérivée EXCLUSIVEMENT de la délibération produite
-        # pendant cet appel — aucun second calcul, aucune reformulation, aucun `reasoning.get()`.
-        # Sélection ``{id, statement, sources}`` : la projection que le moteur définit déjà lui-même
-        # (``explanation.stmts``) — aucune fuite d'implémentation (ni ``hash``/``data``/``tags``).
-        # La délibération **persistée** reste l'unique source de vérité ; ceci n'en est qu'un reflet
-        # (traçable via ``deliberation_id``/``provider``/``as_of``), non persisté.
-        def _statements(items):
-            return [{"id": e.get("id"), "statement": e.get("statement"),
-                     "sources": list(e.get("sources", []) or [])}
-                    for e in (items or [])]
-
-        reco = (delib.get("explanation", {}) or {}).get("recommendation", {}) or {}
+        # Reflet fidèle de la délibération produite pendant cet appel, via la **projection
+        # officielle unique** (:func:`_project_analysis`) — la même que la relecture
+        # ``input_analysis`` (INPUT-ANALYSIS-READ-001). La délibération persistée reste l'unique
+        # source de vérité ; ceci n'en est qu'un reflet, non persisté ici.
         self.bus.publish("input.analyzed",
                          {"input_id": input_id, "deliberation_id": delib.get("id")})
         self._persist_events()
-        return {
-            "ok": True,
-            "input_id": input_id,
-            "analysis": {
-                "deliberation_id": delib.get("id"),
-                "provider": delib.get("provider"),
-                "as_of": delib.get("as_of"),
-                "elements": {
-                    "facts": _statements(delib.get("facts")),
-                    "hypotheses": _statements(delib.get("hypotheses")),
-                    "options": _statements(delib.get("options")),
-                    "risks": _statements(delib.get("risks")),
-                    "inferences": _statements(delib.get("inferences")),
-                },
-                # Recommandation CANDIDATE, projetée verbatim ; aucune décision gouvernée n'est créée.
-                "recommendation": {
-                    "statement": reco.get("statement", ""),
-                    "requires_human_validation": bool(reco.get("requires_human_validation", True)),
-                },
-                "recommendation_status": delib.get("decision", {}).get("status"),
-            },
-        }
+        return {"ok": True, "input_id": input_id, "analysis": _project_analysis(delib)}
 
     def input_history(self, input_id: str) -> Dict[str, Any]:
         """Histoire événementielle d'une **Entrée** (INPUT-HISTORY-001) — **lecture seule**.
@@ -692,6 +699,35 @@ class BrainAIBootstrap:
                   if isinstance(e.get("payload"), dict)
                   and e["payload"].get("input_id") == input_id]
         return {"input_id": input_id, "events": events}
+
+    def input_analysis(self, input_id: str) -> Dict[str, Any]:
+        """Analyse **revisitable** d'une Entrée (INPUT-ANALYSIS-READ-001) — **lecture seule**.
+
+        Relit l'analyse **déjà produite**, **sans jamais recalculer** (aucun ``reason()``), sans
+        second stockage ni seconde projection. **Règle d'unicité explicite** : l'analyse officielle
+        d'une Entrée est la délibération référencée par son événement ``input.analyzed`` **le plus
+        récent** (``seq`` maximal) — plusieurs analyses d'une même Entrée sont possibles (jamais
+        dédupliquées), la plus récente fait foi. La délibération **persistée** (moteur Reasoning)
+        reste l'**unique source de vérité** ; on la récupère par ``reasoning.get`` et on la met en
+        forme via la **projection officielle unique** (:func:`_project_analysis`), identique à
+        ``analyze_input``. **Aucun** effet de bord : aucun événement publié, aucune persistance,
+        aucune mutation d'Entrée, aucune décision, aucune IA. Cas d'erreur (convention des
+        lectures) : Entrée introuvable, aucune analyse, ou délibération introuvable (désync)."""
+        hist = self.input_history(input_id)
+        if hist.get("ok") is False:
+            return hist                                    # Entrée introuvable (même convention)
+        analyzed = [e for e in hist["events"] if e.get("topic") == "input.analyzed"]
+        if not analyzed:
+            return {"ok": False, "error": f"aucune analyse pour cette Entrée : {input_id}"}
+        latest = max(analyzed, key=lambda e: e.get("seq", 0))   # règle : seq maximal
+        delib_id = latest.get("payload", {}).get("deliberation_id")
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        try:
+            delib = self.cognition.reasoning.get(delib_id)      # lecture seule, aucun recalcul
+        except Exception:  # noqa: BLE001 - id absent / stores désynchronisés
+            return {"ok": False, "error": f"délibération introuvable : {delib_id}"}
+        return {"ok": True, "input_id": input_id, "analysis": _project_analysis(delib)}
 
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
