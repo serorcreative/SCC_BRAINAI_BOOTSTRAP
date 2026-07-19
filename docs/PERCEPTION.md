@@ -107,6 +107,10 @@ apparaissent comme **plusieurs** `input.analyzed` distincts. Si un état devient
 nécessaire, il sera une **projection** calculée depuis cette histoire — jamais un champ porté
 par l'Entrée.
 
+**Principe (INPUT-STATE-CORE-001 — résolu par principe).** Une Entrée est un **fait observé
+immuable**. Elle ne possède **pas d'état par nature**. Les états appartiennent aux **objets
+gouvernés** produits à partir des faits, **jamais aux faits eux-mêmes**.
+
 ## Politique d'exposition (Transport)
 
 La politique officielle est **default-deny** et expose **toutes les opérations `read`** du
