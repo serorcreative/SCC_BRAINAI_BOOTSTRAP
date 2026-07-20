@@ -132,5 +132,8 @@ class Presentation:
     def analyze_input(self, input_id: str) -> Dict[str, Any]:
         return self._wrap("analyze_input", self._boot.analyze_input(input_id))
 
+    def input_decide(self, input_id: str) -> Dict[str, Any]:
+        return self._wrap("input_decide", self._boot.decide_from_input(input_id))
+
 
 __all__ = ["Presentation"]

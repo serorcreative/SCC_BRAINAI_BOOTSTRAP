@@ -331,6 +331,62 @@ class BrainAIBootstrap:
             "needs_human_validation": True,
         }
 
+    def decide_from_input(self, input_id: str, urgency: float = 0.3) -> Dict[str, Any]:
+        """Propose une décision gouvernée **à partir de l'analyse existante** d'une Entrée
+        (INPUT-DECIDE-001) — pont Entrée → analyse → délibération → décision **proposée**.
+
+        **Ne réexécute jamais** ``reason()`` : réutilise la **délibération déjà produite** (règle
+        d'unicité : l'analyse officielle = l'événement ``input.analyzed`` le plus récent, ``seq``
+        max). Le moteur Décision **lit** cette délibération (``gateway.deliberation`` →
+        ``reasoning.get``) et en dérive la décision ; **aucune seconde délibération** n'est créée.
+        L'Entrée n'est **jamais mutée** ; la décision est **proposée** (exige une validation humaine) ;
+        la provenance ``decision.traceability.deliberation`` est portée par le moteur. Erreurs
+        (convention des lectures/actions) : Entrée introuvable, aucune analyse, délibération
+        introuvable, pile cognitive indisponible."""
+        if not self._booted:
+            self.run()
+        self.config.ensure_directories()
+        hist = self.input_history(input_id)
+        if hist.get("ok") is False:
+            return hist                                     # Entrée introuvable (même convention)
+        analyzed = [e for e in hist["events"] if e.get("topic") == "input.analyzed"]
+        if not analyzed:
+            return {"ok": False, "error": f"aucune analyse pour cette Entrée : {input_id}"}
+        delib_id = max(analyzed, key=lambda e: e.get("seq", 0))["payload"].get("deliberation_id")
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        try:
+            delib = self.cognition.reasoning.get(delib_id)  # sujet autoritatif ; aucun re-raisonnement
+        except Exception:  # noqa: BLE001 - id absent / stores désynchronisés
+            return {"ok": False, "error": f"délibération introuvable : {delib_id}"}
+        subject = (delib.get("problem", {}) or {}).get("question", "")
+        learning_ids = self._validated_learning_ids()
+        try:
+            rec = self.cognition.decision.decide(
+                subject, deliberation_id=delib_id, urgency=urgency, learning_ids=learning_ids)
+        except Exception as exc:  # noqa: BLE001 - délibération obsolète / options vides
+            return {"ok": False, "error": str(exc)}
+        self.bus.publish("decision.proposed",
+                         {"decision_id": rec["id"], "subject": subject,
+                          "learnings": len(learning_ids)})
+        self.session.note("decisions")
+        self._persist_events()
+        selected = next((o for o in rec["options"] if o["id"] == rec["selected_id"]), {})
+        return {
+            "ok": True,
+            "input_id": input_id,
+            "deliberation_id": delib_id,
+            "decision_id": rec["id"],
+            "selected": selected.get("name"),
+            "class": rec["qualification"].get("class"),
+            "status": rec["status"],
+            "options": [{"name": o["name"], "score": o["score"], "selected": o["selected"]}
+                        for o in rec["options"]],
+            "validation_conditions": rec["validation_conditions"],
+            "applied_learnings": rec["traceability"].get("learnings", []),
+            "needs_human_validation": True,
+        }
+
     def validate_decision(self, decision_id: str, approver: str, reason: str = "") -> Dict[str, Any]:
         """Validation humaine d'une décision candidate (garde-fou de souveraineté)."""
         if not self.cognition.available():

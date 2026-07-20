@@ -42,6 +42,7 @@ OPERATIONS: Dict[str, Dict[str, str]] = {
     "validate_learning": {"kind": "action", "summary": "Valider un apprentissage (humain)"},
     "record_input": {"kind": "action", "summary": "Enregistrer une Entrée texte"},
     "analyze_input": {"kind": "action", "summary": "Analyser une Entrée (Reasoning)"},
+    "input_decide": {"kind": "action", "summary": "Proposer une décision à partir de l'analyse d'une Entrée"},
 }
 
 
