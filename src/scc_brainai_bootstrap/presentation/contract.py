@@ -32,6 +32,7 @@ OPERATIONS: Dict[str, Dict[str, str]] = {
     "input": {"kind": "read", "summary": "Détail d'une Entrée par identifiant"},
     "input_history": {"kind": "read", "summary": "Histoire événementielle d'une Entrée"},
     "input_analysis": {"kind": "read", "summary": "Analyse revisitable d'une Entrée (délibération persistée)"},
+    "input_decisions": {"kind": "read", "summary": "Décisions dérivées d'une Entrée (via sa délibération)"},
     "start": {"kind": "action", "summary": "Démarrer BrainAI"},
     "run": {"kind": "action", "summary": "Traiter une demande (routage auto)"},
     "decide": {"kind": "action", "summary": "Formaliser une décision candidate"},

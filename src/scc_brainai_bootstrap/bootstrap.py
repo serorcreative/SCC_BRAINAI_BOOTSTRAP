@@ -785,6 +785,48 @@ class BrainAIBootstrap:
             return {"ok": False, "error": f"délibération introuvable : {delib_id}"}
         return {"ok": True, "input_id": input_id, "analysis": _project_analysis(delib)}
 
+    def input_decisions(self, input_id: str) -> Dict[str, Any]:
+        """Décisions **dérivées** d'une Entrée (INPUT-DECISION-LINK-001) — **lecture seule**.
+
+        Ferme la boucle de découvrabilité en parcourant la **traçabilité existante**, sans nouvel
+        événement ni stockage : ``input_id`` → ``deliberation_id`` (via **tous** les événements
+        ``input.analyzed`` de l'Entrée) → décisions dont ``traceability.deliberation`` cible l'une
+        de ces délibérations. Reflète le **statut courant de gouvernance** de chaque décision
+        (proposée / validée…) ; l'axe **Exécution** est hors périmètre. Projection stricte
+        ``{decision_id, status, class, subject}`` ; aucune donnée fabriquée. Entrée inconnue →
+        ``{ok:false, error}`` ; Entrée sans analyse → ``{ok:true, decisions: []}``. Énumération via
+        l'**accesseur complet** ``decision.decisions`` (``index.all``), sans limite implicite."""
+        hist = self.input_history(input_id)
+        if hist.get("ok") is False:
+            return hist                                     # Entrée introuvable (même convention)
+        delib_ids = {e["payload"].get("deliberation_id")
+                     for e in hist["events"] if e.get("topic") == "input.analyzed"}
+        delib_ids.discard(None)
+        if not delib_ids:
+            return {"ok": True, "input_id": input_id, "decisions": []}
+        if not self.cognition.available():
+            return {"ok": False, "error": f"pile cognitive indisponible : {self.cognition.error}"}
+        # Scan complet des décisions puis filtrage par délibération. Suffisant à ce volume ; si le
+        # nombre de décisions devient important, envisager un index par ``deliberation_id`` côté
+        # moteur Décision (optimisation, hors périmètre de ce chantier).
+        # **Plusieurs décisions** peuvent référencer une même délibération : toutes sont collectées
+        # (aucune hypothèse d'unicité). Champs projetés **directement** depuis la décision officielle
+        # (``to_dict``) — aucune recomposition, aucun calcul, aucune valeur par défaut (une clé
+        # absente ⇒ ``None``, reflet de l'absence).
+        decisions = []
+        for rec in (d.to_dict() for d in self.cognition.decision.decisions):
+            if (rec.get("traceability", {}) or {}).get("deliberation") in delib_ids:
+                decisions.append({
+                    "decision_id": rec.get("id"),
+                    "status": rec.get("status"),
+                    "class": (rec.get("qualification", {}) or {}).get("class"),
+                    "subject": (rec.get("request", {}) or {}).get("subject"),
+                })
+        # Ordre déterministe garanti **par cette lecture** (indépendant de l'ordre interne de
+        # ``decision.decisions``) : tri stable par identifiant de décision (adressé-contenu).
+        decisions.sort(key=lambda d: d.get("decision_id") or "")
+        return {"ok": True, "input_id": input_id, "decisions": decisions}
+
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
         path = self.events_path
