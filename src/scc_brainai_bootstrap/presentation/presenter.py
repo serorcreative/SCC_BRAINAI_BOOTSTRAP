@@ -138,5 +138,14 @@ class Presentation:
     def input_decide(self, input_id: str) -> Dict[str, Any]:
         return self._wrap("input_decide", self._boot.decide_from_input(input_id))
 
+    def dossiers(self) -> Dict[str, Any]:
+        return self._wrap("dossiers", self._boot.list_dossiers())
+
+    def dossier(self, dossier_id: str) -> Dict[str, Any]:
+        return self._wrap("dossier", self._boot.get_dossier(dossier_id))
+
+    def open_dossier(self, seed: str, correlation_key: str, actor: str) -> Dict[str, Any]:
+        return self._wrap("open_dossier", self._boot.open_dossier(seed, correlation_key, actor))
+
 
 __all__ = ["Presentation"]

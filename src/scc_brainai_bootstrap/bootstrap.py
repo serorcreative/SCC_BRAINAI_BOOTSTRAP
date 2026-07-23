@@ -43,6 +43,7 @@ from scc_brainai_bootstrap.doctor import Doctor
 from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.learning import LearningLayer
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
+from scc_brainai_bootstrap.dossier import DossierConflict, DossierOpenError, DossierService
 from scc_brainai_bootstrap.perception import PerceptionService
 from scc_brainai_bootstrap import router
 from scc_brainai_bootstrap.session import SessionStore
@@ -124,6 +125,7 @@ class BrainAIBootstrap:
         # Pilier Perception — socle de lecture des Entrées (fait acquis normalisé, immuable).
         # Le Bootstrap délègue toute la logique d'entrée à ce collaborateur dédié.
         self.perception = PerceptionService(self.config)
+        self.dossier_service = DossierService(self.config)
         self._session_state = None
         self._booted = False
 
@@ -826,6 +828,59 @@ class BrainAIBootstrap:
         # ``decision.decisions``) : tri stable par identifiant de décision (adressé-contenu).
         decisions.sort(key=lambda d: d.get("decision_id") or "")
         return {"ok": True, "input_id": input_id, "decisions": decisions}
+
+    # ================================================================== #
+    # Dossiers — unité durable de travail (DOSSIER-CORE-001)
+    # ================================================================== #
+    def open_dossier(self, seed: str, correlation_key: str, actor: str) -> Dict[str, Any]:
+        """**Ouvre** un Dossier — acte **gouverné** (unité durable de travail).
+
+        Demande d'ouverture **idempotente par ``{actor, correlation_key}``** ; contenu canonique
+        (``seed``) **figé à la première réception**. **Acteur explicite requis** — aucun défaut
+        générique. Audit distinct : première ouverture → ``dossier.opened`` ; rejeu valide →
+        ``dossier.open_replayed`` (non mutatif) ; réutilisation conflictuelle → ``dossier.open_rejected``
+        (refus, aucune création)."""
+        try:
+            res = self.dossier_service.open(seed=seed, correlation_key=correlation_key, actor=actor)
+        except DossierConflict as exc:
+            self.bus.publish("dossier.open_rejected",
+                             {"request_id": exc.request_id, "actor": actor.strip()})
+            self._persist_events()
+            return {"ok": False, "conflict": True, "error": str(exc)}
+        except DossierOpenError as exc:
+            return {"ok": False, "error": str(exc)}
+        d = res["dossier"]
+        if res["outcome"] == "opened":
+            self.bus.publish("dossier.opened",
+                             {"dossier_id": d["dossier_id"], "request_id": d["request_id"],
+                              "opened_by": d["opened_by"], "seed": d["seed"]})
+        else:  # rejeu idempotent — événement d'audit **non mutatif**
+            self.bus.publish("dossier.open_replayed",
+                             {"dossier_id": d["dossier_id"], "request_id": d["request_id"],
+                              "actor": d["opened_by"]})
+        self._persist_events()
+        return {
+            "ok": True,
+            "replayed": res["outcome"] == "replayed",
+            "dossier_id": d["dossier_id"],
+            "request_id": d["request_id"],
+            "status": d["status"],
+            "label": d["label"],
+            "opened_by": d["opened_by"],
+            "opened_as_of": d["opened_as_of"],
+        }
+
+    def list_dossiers(self) -> Dict[str, Any]:
+        """Liste des Dossiers (lecture seule, projection légère)."""
+        items = self.dossier_service.list()
+        return {"count": len(items), "items": items}
+
+    def get_dossier(self, dossier_id: str) -> Dict[str, Any]:
+        """Détail d'un Dossier par identifiant (lecture seule) ; id inconnu → ``{ok:false, error}``."""
+        d = self.dossier_service.read(dossier_id)
+        if d is None:
+            return {"ok": False, "error": f"Dossier introuvable : {dossier_id}"}
+        return d
 
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
