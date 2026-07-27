@@ -44,6 +44,7 @@ from scc_brainai_bootstrap.event_bus import EventBus
 from scc_brainai_bootstrap.learning import LearningLayer
 from scc_brainai_bootstrap.patrimony import PatrimonyManager
 from scc_brainai_bootstrap.dossier import DossierConflict, DossierOpenError, DossierService
+from scc_brainai_bootstrap.dossier_link import DossierLinkError, DossierLinkService
 from scc_brainai_bootstrap.perception import PerceptionService
 from scc_brainai_bootstrap import router
 from scc_brainai_bootstrap.session import SessionStore
@@ -126,6 +127,8 @@ class BrainAIBootstrap:
         # Le Bootstrap délègue toute la logique d'entrée à ce collaborateur dédié.
         self.perception = PerceptionService(self.config)
         self.dossier_service = DossierService(self.config)
+        # Rattachement Entrée↔Dossier — fait de liaison durable (DOSSIER-LINK-CORE-001).
+        self.dossier_link_service = DossierLinkService(self.config)
         self._session_state = None
         self._booted = False
 
@@ -881,6 +884,64 @@ class BrainAIBootstrap:
         if d is None:
             return {"ok": False, "error": f"Dossier introuvable : {dossier_id}"}
         return d
+
+    def attach_input(self, dossier_id: str, input_id: str, actor: str) -> Dict[str, Any]:
+        """**Rattache** une Entrée à un Dossier — acte **gouverné** (DOSSIER-LINK-CORE-001).
+
+        Un rattachement est un **fait daté et attribué** déclarant que l'Entrée appartient au
+        Dossier ; il ne modifie **ni** l'Entrée **ni** le Dossier. **Existence validée d'abord**
+        (Dossier puis Entrée) : identifiant inconnu → reflet d'erreur, aucune écriture (mêmes
+        conventions que :meth:`get_dossier` / :meth:`input`). **Idempotent par paire**
+        ``(dossier_id, input_id)`` : le rejeu ne crée aucun second fait et **ne mute pas** le
+        fait initial. **Acteur explicite requis**. Audit distinct : rattachement initial →
+        ``dossier.input_attached`` ; rejeu valide → ``dossier.input_attach_replayed`` (non mutatif)."""
+        if self.dossier_service.read(dossier_id) is None:
+            return {"ok": False, "error": f"Dossier introuvable : {dossier_id}"}
+        if self.perception.read(input_id) is None:
+            return {"ok": False, "error": f"Entrée introuvable : {input_id}"}
+        try:
+            res = self.dossier_link_service.attach(
+                dossier_id=dossier_id, input_id=input_id, actor=actor)
+        except DossierLinkError as exc:
+            return {"ok": False, "error": str(exc)}
+        link = res["link"]
+        topic = ("dossier.input_attached" if res["outcome"] == "attached"
+                 else "dossier.input_attach_replayed")
+        self.bus.publish(topic, {"dossier_id": link["dossier_id"], "input_id": link["input_id"],
+                                 "link_id": link["link_id"], "attached_by": link["attached_by"]})
+        self._persist_events()
+        return {
+            "ok": True,
+            "replayed": res["outcome"] == "replayed",
+            "link_id": link["link_id"],
+            "dossier_id": link["dossier_id"],
+            "input_id": link["input_id"],
+            "attached_by": link["attached_by"],
+            "attached_as_of": link["attached_as_of"],
+        }
+
+    def dossier_inputs(self, dossier_id: str) -> Dict[str, Any]:
+        """Entrées **rattachées** à un Dossier (DOSSIER-LINK-CORE-001) — **lecture seule**.
+
+        L'**appartenance courante** est une **projection** des faits de rattachement : on lit les
+        liens du Dossier (ordre déterministe du service) et, pour chacun, on reflète l'Entrée via
+        la **projection officielle des Entrées** (réutilisée telle quelle depuis Perception, sans
+        nouvelle représentation locale). Dossier inconnu → ``{ok:false, error}`` (convention des
+        lectures). **Fail-closed** : un fait durable référençant une Entrée devenue introuvable est
+        une **incohérence de stockage** (l'existence fut vérifiée au rattachement) — on ne l'omet
+        pas, on ne fabrique rien, on ne renvoie pas de liste partielle : ``{ok:false, error}`` qui
+        **nomme l'Entrée**. Aucun événement, aucune mutation, aucune correction."""
+        if self.dossier_service.read(dossier_id) is None:
+            return {"ok": False, "error": f"Dossier introuvable : {dossier_id}"}
+        projected = {p["id"]: p for p in self.perception.project()}
+        items = []
+        for link in self.dossier_link_service.list_for_dossier(dossier_id):
+            iid = link["input_id"]
+            if iid not in projected:                          # fail-closed : incohérence durable
+                return {"ok": False,
+                        "error": f"Incohérence de rattachement : Entrée introuvable : {iid}"}
+            items.append(projected[iid])
+        return {"ok": True, "dossier_id": dossier_id, "count": len(items), "items": items}
 
     def journal(self, topic: str = None) -> Dict[str, Any]:
         """Journal d'événements persistant (lecture seule ; ne démarre pas BrainAI)."""
