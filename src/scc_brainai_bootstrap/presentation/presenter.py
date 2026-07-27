@@ -144,8 +144,14 @@ class Presentation:
     def dossier(self, dossier_id: str) -> Dict[str, Any]:
         return self._wrap("dossier", self._boot.get_dossier(dossier_id))
 
+    def dossier_inputs(self, dossier_id: str) -> Dict[str, Any]:
+        return self._wrap("dossier_inputs", self._boot.dossier_inputs(dossier_id))
+
     def open_dossier(self, seed: str, correlation_key: str, actor: str) -> Dict[str, Any]:
         return self._wrap("open_dossier", self._boot.open_dossier(seed, correlation_key, actor))
+
+    def attach_input(self, dossier_id: str, input_id: str, actor: str) -> Dict[str, Any]:
+        return self._wrap("attach_input", self._boot.attach_input(dossier_id, input_id, actor))
 
 
 __all__ = ["Presentation"]

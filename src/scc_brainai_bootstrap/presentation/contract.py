@@ -35,6 +35,7 @@ OPERATIONS: Dict[str, Dict[str, str]] = {
     "input_decisions": {"kind": "read", "summary": "Décisions dérivées d'une Entrée (via sa délibération)"},
     "dossiers": {"kind": "read", "summary": "Liste des Dossiers (unité durable de travail)"},
     "dossier": {"kind": "read", "summary": "Détail d'un Dossier par identifiant"},
+    "dossier_inputs": {"kind": "read", "summary": "Entrées rattachées à un Dossier (appartenance projetée)"},
     "start": {"kind": "action", "summary": "Démarrer BrainAI"},
     "run": {"kind": "action", "summary": "Traiter une demande (routage auto)"},
     "decide": {"kind": "action", "summary": "Formaliser une décision candidate"},
@@ -47,6 +48,7 @@ OPERATIONS: Dict[str, Dict[str, str]] = {
     "analyze_input": {"kind": "action", "summary": "Analyser une Entrée (Reasoning)"},
     "input_decide": {"kind": "action", "summary": "Proposer une décision à partir de l'analyse d'une Entrée"},
     "open_dossier": {"kind": "action", "summary": "Ouvrir un Dossier (demande gouvernée, idempotente par clé)"},
+    "attach_input": {"kind": "action", "summary": "Rattacher une Entrée à un Dossier (demande gouvernée, idempotente par paire)"},
 }
 
 
