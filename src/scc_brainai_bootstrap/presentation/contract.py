@@ -49,6 +49,7 @@ OPERATIONS: Dict[str, Dict[str, str]] = {
     "input_decide": {"kind": "action", "summary": "Proposer une décision à partir de l'analyse d'une Entrée"},
     "open_dossier": {"kind": "action", "summary": "Ouvrir un Dossier (demande gouvernée, idempotente par clé)"},
     "attach_input": {"kind": "action", "summary": "Rattacher une Entrée à un Dossier (demande gouvernée, idempotente par paire)"},
+    "detach_input": {"kind": "action", "summary": "Détacher une Entrée d'un Dossier (demande gouvernée, idempotente ; fait immuable, jamais une suppression)"},
 }
 
 

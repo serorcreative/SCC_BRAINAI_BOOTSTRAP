@@ -153,5 +153,8 @@ class Presentation:
     def attach_input(self, dossier_id: str, input_id: str, actor: str) -> Dict[str, Any]:
         return self._wrap("attach_input", self._boot.attach_input(dossier_id, input_id, actor))
 
+    def detach_input(self, dossier_id: str, input_id: str, actor: str) -> Dict[str, Any]:
+        return self._wrap("detach_input", self._boot.detach_input(dossier_id, input_id, actor))
+
 
 __all__ = ["Presentation"]
