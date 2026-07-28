@@ -920,6 +920,47 @@ class BrainAIBootstrap:
             "attached_as_of": link["attached_as_of"],
         }
 
+    def detach_input(self, dossier_id: str, input_id: str, actor: str) -> Dict[str, Any]:
+        """**Détache** une Entrée d'un Dossier — acte **gouverné** (DOSSIER-LINK-CORE-003).
+
+        Le détachement est un **nouveau fait immuable** (``detached``) qui **annule** le
+        rattachement courant — **jamais** une suppression (le fait d'attache demeure). **Existence
+        validée d'abord** (Dossier puis Entrée) : identifiant inconnu → reflet d'erreur, aucune
+        écriture (mêmes conventions que :meth:`attach_input`). **Acteur explicite requis**.
+        **Idempotent** : si la paire n'est **pas** actuellement rattachée (jamais liée, ou déjà
+        détachée), rien n'est ajouté → ``detached: false`` (noop, rien à annuler). Audit distinct,
+        sur le patron de :meth:`attach_input` : détachement effectif → ``dossier.input_detached`` ;
+        noop → ``dossier.input_detach_noop`` (non mutatif)."""
+        if self.dossier_service.read(dossier_id) is None:
+            return {"ok": False, "error": f"Dossier introuvable : {dossier_id}"}
+        if self.perception.read(input_id) is None:
+            return {"ok": False, "error": f"Entrée introuvable : {input_id}"}
+        try:
+            res = self.dossier_link_service.detach(
+                dossier_id=dossier_id, input_id=input_id, actor=actor)
+        except DossierLinkError as exc:
+            return {"ok": False, "error": str(exc)}
+        if res["outcome"] != "detached":
+            # noop : la paire n'était pas rattachée ; aucun fait ajouté, rien n'est fabriqué.
+            self.bus.publish("dossier.input_detach_noop",
+                             {"dossier_id": dossier_id, "input_id": input_id})
+            self._persist_events()
+            return {"ok": True, "detached": False, "dossier_id": dossier_id, "input_id": input_id}
+        fact = res["link"]
+        self.bus.publish("dossier.input_detached",
+                         {"dossier_id": fact["dossier_id"], "input_id": fact["input_id"],
+                          "link_id": fact["link_id"], "detached_by": fact["detached_by"]})
+        self._persist_events()
+        return {
+            "ok": True,
+            "detached": True,
+            "link_id": fact["link_id"],
+            "dossier_id": fact["dossier_id"],
+            "input_id": fact["input_id"],
+            "detached_by": fact["detached_by"],
+            "detached_as_of": fact["detached_as_of"],
+        }
+
     def dossier_inputs(self, dossier_id: str) -> Dict[str, Any]:
         """Entrées **rattachées** à un Dossier (DOSSIER-LINK-CORE-001) — **lecture seule**.
 
