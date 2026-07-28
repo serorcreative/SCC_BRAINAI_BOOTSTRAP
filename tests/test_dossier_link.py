@@ -1,12 +1,16 @@
-"""Tests du service métier de rattachement (DOSSIER-LINK-CORE-001, Tranche 1).
+"""Tests du service métier de liaison (DOSSIER-LINK-CORE-001/003, Tranche 1).
 
-Prouve, sur le service **pur** (aucune orchestration, aucun contrat, aucun événement) : le
-**fait de rattachement** Entrée↔Dossier, son identité **déterministe adressée par la paire**,
-le store **append-only durable** (``data/dossier_links.jsonl``), l'**idempotence par paire**
-(rejeu → aucune seconde ligne, fait **figé**), la **cardinalité plurielle** (plusieurs Entrées
-par Dossier ; une même Entrée dans plusieurs Dossiers), l'**isolation de lecture** par Dossier,
-la **persistance** au travers d'une réinstanciation, l'**ordre déterministe** et l'**absence de
-mutation** du store par l'appelant. Aucun détachement (hors périmètre).
+Prouve, sur le service **pur** (aucune orchestration, aucun contrat, aucun événement) : les
+**faits de liaison** Entrée↔Dossier (``attached`` / ``detached``), leur identité **déterministe
+adressée par la paire**, le store **append-only durable** (``data/dossier_links.jsonl``),
+l'**idempotence fondée sur l'appartenance courante** (rejeu d'attache → aucune seconde ligne,
+fait **figé**), la **cardinalité plurielle**, l'**isolation de lecture** par Dossier, la
+**persistance**, l'**ordre déterministe** et l'**absence de mutation** du store par l'appelant.
+
+DOSSIER-LINK-CORE-003 (Tranche 1) : le **détachement** comme **nouveau fait immuable** (jamais
+une suppression) ; la **projection « dernier fait gagnant »** ; le **ré-attachement** après
+détachement ; l'idempotence du détachement (``noop`` si rien à annuler) ; la conservation
+**intégrale** des faits (append-only strict).
 """
 
 from __future__ import annotations
@@ -29,8 +33,9 @@ def test_attach_creates_link_with_exact_fields(config):
     res = svc.attach(dossier_id=D1, input_id=I1, actor="alice")
     assert res["outcome"] == "attached"
     link = res["link"]
-    assert set(link) == {"link_id", "dossier_id", "input_id", "attached_by", "attached_as_of"}
+    assert set(link) == {"link_id", "dossier_id", "input_id", "kind", "attached_by", "attached_as_of"}
     assert link["link_id"].startswith("doslink_")
+    assert link["kind"] == "attached"                          # fait typé (attaché / détaché)
     assert link["dossier_id"] == D1 and link["input_id"] == I1
     assert link["attached_by"] == "alice"
     assert link["attached_as_of"] == config.as_of              # datation figée = as_of déterministe
@@ -155,3 +160,100 @@ def test_store_is_immutable_against_caller_mutation(config):
     reread = svc.list_for_dossier(D1)[0]
     reread["dossier_id"] = "dos_HACKED"                       # mutation d'une lecture
     assert svc.list_for_dossier(D1)[0]["dossier_id"] == D1    # relecture disque non affectée
+
+
+# --------------------------------------------------------------------- #
+# Détachement — nouveau fait immuable (DOSSIER-LINK-CORE-003)
+# --------------------------------------------------------------------- #
+def test_detach_appends_fact_and_never_deletes(config):
+    svc = DossierLinkService(config)
+    svc.attach(dossier_id=D1, input_id=I1, actor="alice")
+    res = svc.detach(dossier_id=D1, input_id=I1, actor="bob")
+    assert res["outcome"] == "detached"
+    fact = res["link"]
+    assert set(fact) == {"link_id", "dossier_id", "input_id", "kind", "detached_by", "detached_as_of"}
+    assert fact["kind"] == "detached"
+    assert fact["detached_by"] == "bob" and fact["detached_as_of"] == config.as_of
+    assert fact["link_id"] == svc.link_id(D1, I1)             # même paire → même link_id que l'attache
+    # append-only strict : le fait d'attache n'est PAS supprimé (les deux lignes coexistent)
+    assert len(_lines(svc)) == 2
+
+
+def test_detach_excludes_pair_from_projection(config):
+    svc = DossierLinkService(config)
+    svc.attach(dossier_id=D1, input_id=I1, actor="alice")
+    svc.attach(dossier_id=D1, input_id=I2, actor="alice")
+    svc.detach(dossier_id=D1, input_id=I1, actor="alice")
+    got = [l["input_id"] for l in svc.list_for_dossier(D1)]
+    assert got == [I2]                                        # I1 détachée → hors appartenance ; I2 conservée
+    assert I1 not in got
+
+
+def test_detach_requires_actor(config):
+    svc = DossierLinkService(config)
+    svc.attach(dossier_id=D1, input_id=I1, actor="alice")
+    for bad in (dict(dossier_id="", input_id=I1, actor="a"),
+                dict(dossier_id=D1, input_id="  ", actor="a"),
+                dict(dossier_id=D1, input_id=I1, actor="")):
+        try:
+            svc.detach(**bad)
+            assert False, "un champ manquant aurait dû être refusé"
+        except DossierLinkError:
+            pass
+    assert len(_lines(svc)) == 1                              # aucun refus n'a écrit de fait
+
+
+def test_detach_is_idempotent_noop_when_not_attached(config):
+    svc = DossierLinkService(config)
+    # jamais rattachée → rien à détacher
+    r0 = svc.detach(dossier_id=D1, input_id=I1, actor="alice")
+    assert r0["outcome"] == "noop"
+    assert not svc.path.exists() or len(_lines(svc)) == 0
+    # attachée puis détachée → re-détacher est un noop (aucune 3e ligne)
+    svc.attach(dossier_id=D1, input_id=I1, actor="alice")
+    svc.detach(dossier_id=D1, input_id=I1, actor="alice")
+    r1 = svc.detach(dossier_id=D1, input_id=I1, actor="alice")
+    assert r1["outcome"] == "noop"
+    assert len(_lines(svc)) == 2                              # 1 attach + 1 detach, rien de plus
+
+
+# --------------------------------------------------------------------- #
+# Projection « dernier fait gagnant » + ré-attachement
+# --------------------------------------------------------------------- #
+def test_last_fact_wins_determines_membership(config):
+    svc = DossierLinkService(config)
+    svc.attach(dossier_id=D1, input_id=I1, actor="alice")
+    assert [l["input_id"] for l in svc.list_for_dossier(D1)] == [I1]   # dernier = attached → membre
+    svc.detach(dossier_id=D1, input_id=I1, actor="alice")
+    assert svc.list_for_dossier(D1) == []                             # dernier = detached → non membre
+
+
+def test_reattach_after_detach_appends_new_attached_fact(config):
+    svc = DossierLinkService(config)
+    svc.attach(dossier_id=D1, input_id=I1, actor="alice")
+    svc.detach(dossier_id=D1, input_id=I1, actor="alice")
+    res = svc.attach(dossier_id=D1, input_id=I1, actor="carol")       # ré-attachement après détachement
+    assert res["outcome"] == "attached"                              # nouvel acte, pas un rejeu
+    assert res["link"]["attached_by"] == "carol"
+    got = svc.list_for_dossier(D1)
+    assert [l["input_id"] for l in got] == [I1] and got[0]["attached_by"] == "carol"
+    # trois faits conservés (attach, detach, attach) : append-only strict, aucun fait supprimé
+    assert len(_lines(svc)) == 3
+
+
+def test_reattach_is_idempotent_once_attached(config):
+    svc = DossierLinkService(config)
+    svc.attach(dossier_id=D1, input_id=I1, actor="alice")
+    svc.detach(dossier_id=D1, input_id=I1, actor="alice")
+    svc.attach(dossier_id=D1, input_id=I1, actor="carol")            # ré-attachement (3e fait)
+    r = svc.attach(dossier_id=D1, input_id=I1, actor="dan")         # déjà rattaché → rejeu figé
+    assert r["outcome"] == "replayed" and r["link"]["attached_by"] == "carol"
+    assert len(_lines(svc)) == 3                                    # aucune 4e ligne
+
+
+def test_facts_persist_across_instances(config):
+    DossierLinkService(config).attach(dossier_id=D1, input_id=I1, actor="alice")
+    DossierLinkService(config).detach(dossier_id=D1, input_id=I1, actor="alice")
+    reloaded = DossierLinkService(config)                            # nouvelle instance, même config
+    assert reloaded.list_for_dossier(D1) == []                       # projection durable (détaché)
+    assert len(_lines(reloaded)) == 2                                # faits durables au-delà de l'instance
