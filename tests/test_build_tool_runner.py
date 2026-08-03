@@ -11,6 +11,7 @@ réellement testé · A5 aucun autre store modifié · A6 stdout/stderr/exit_cod
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -21,6 +22,20 @@ from scc_brainai_bootstrap.builder.workspace import Workspace, WorkspaceError
 
 AS_OF = "2026-08-03T00:00:00+00:00"
 PY = sys.executable  # interpréteur réel = l'« outil » de la preuve (argv absolu, aucun PATH requis)
+
+
+def _pid_alive(pid: int) -> bool:
+    """True si ``pid`` existe **encore** dans la table (y compris zombie non récolté).
+
+    ``kill(pid, 0)`` réussit tant que l'entrée process existe — un zombie répond donc ``True`` ;
+    ``ESRCH`` (:class:`ProcessLookupError`) prouve la **récolte** effective (plus aucune entrée)."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:      # existe mais hors de notre portée — reste « vivant »
+        return True
 
 
 def _store(tmp_path):
@@ -99,6 +114,32 @@ def test_invalid_project_id_rejected(tmp_path):
 
 
 # --------------------------------------------------------------------- #
+# T1a — échappée par lien symbolique refusée AVANT tout effet externe
+# --------------------------------------------------------------------- #
+def test_symlink_escape_rejected_before_any_effect(tmp_path):
+    """Un symlink DANS le workspace pointant DEHORS est refusé par ``resolve_within`` (qui résout
+    les liens) — donc BrainAI ne passe jamais un tel chemin à un outil : aucun effet partiel."""
+    ws = _workspace(tmp_path)
+    store = _store(tmp_path)
+    outside = tmp_path / "outside_secret"            # cible HORS workspace
+    outside.mkdir()
+
+    # (a) symlink-répertoire : <ws>/escape -> outside ; écrire « escape/hack.txt » échapperait.
+    (ws.path / "escape").symlink_to(outside, target_is_directory=True)
+    # (b) symlink-fichier : <ws>/evil.txt -> outside/secret.txt (cible inexistante mais résolue).
+    (ws.path / "evil.txt").symlink_to(outside / "secret.txt")
+
+    for escaping in ("escape/hack.txt", "evil.txt"):
+        with pytest.raises(WorkspaceError):
+            ws.resolve_within(escaping)              # refus AVANT toute construction d'argv
+
+    # Aucun fichier n'a été créé hors du workspace, et aucune invocation n'a été ouverte
+    # (le garde-fou précède la frontière subprocess) → aucun fait partiel, aucun effet partiel.
+    assert list(outside.iterdir()) == []
+    assert store.read_all() == []
+
+
+# --------------------------------------------------------------------- #
 # A4 — timeout réellement testé
 # --------------------------------------------------------------------- #
 def test_timeout_is_real_and_recorded_as_failure(tmp_path):
@@ -108,6 +149,26 @@ def test_timeout_is_real_and_recorded_as_failure(tmp_path):
     fact = invoke_tool(store=store, workspace=ws, argv=argv, timeout=1, as_of=AS_OF)
     # Le processus a dépassé la limite : tué, reflété comme fait en échec (timeout).
     assert fact["status"] == "timeout" and fact["timed_out"] is True and fact["exit_code"] is None
+
+
+# --------------------------------------------------------------------- #
+# T1c — après timeout : processus tué, récolté, aucun zombie résiduel
+# --------------------------------------------------------------------- #
+def test_timeout_leaves_no_zombie_process(tmp_path):
+    """Le sous-processus dépassant le timeout est tué ET **récolté** (attendu) par le runner :
+    à son retour, le pid enfant n'existe plus (ni vivant, ni zombie)."""
+    ws = _workspace(tmp_path)
+    store = _store(tmp_path)
+    # L'enfant publie son PID (flush) AVANT de dormir → capturé dans le stdout partiel du timeout.
+    argv = [PY, "-c",
+            "import os,sys,time; sys.stdout.write(str(os.getpid())+'\\n'); sys.stdout.flush(); time.sleep(30)"]
+
+    fact = invoke_tool(store=store, workspace=ws, argv=argv, timeout=1, as_of=AS_OF)
+
+    assert fact["status"] == "timeout" and fact["timed_out"] is True
+    child_pid = int(fact["stdout"].strip().splitlines()[0])   # PID réel du sous-processus tué
+    # À ce point, run_confined est revenu : subprocess.run a tué PUIS récolté l'enfant.
+    assert not _pid_alive(child_pid), f"pid {child_pid} encore présent (zombie/vivant) après timeout"
 
 
 # --------------------------------------------------------------------- #
