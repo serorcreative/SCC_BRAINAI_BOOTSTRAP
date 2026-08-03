@@ -11,6 +11,7 @@ Déterminisme : ``as_of`` fige l'horodatage du démarrage.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -125,13 +126,25 @@ def _resolve(base: Path, value: str) -> Path:
     return p if p.is_absolute() else (base / p).resolve()
 
 
+def _apply_env_data_dir(config: BrainAIConfig) -> BrainAIConfig:
+    """Override **prioritaire** du répertoire de données via ``SCC_BRAINAI_DATA_DIR``.
+
+    Isolation de test / déploiement : appliqué **en dernier** (prime sur le fichier de config)
+    afin qu'aucune exécution de test ne puisse écrire dans le ``data/`` réel du dépôt. N'affecte
+    ni le Contrat, ni le transport, ni la gouvernance ; simple redirection d'infrastructure."""
+    env = os.environ.get("SCC_BRAINAI_DATA_DIR")
+    if env:
+        config.data_dir = _resolve(config.bootstrap_root, env)
+    return config
+
+
 def load_config(path: Optional[Path] = None) -> BrainAIConfig:
     config = BrainAIConfig()
     target = Path(path) if path else DEFAULT_CONFIG_PATH
     if not target.exists():
         if path is not None:
             raise ConfigError(f"Configuration introuvable : {target}")
-        return config
+        return _apply_env_data_dir(config)
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -147,7 +160,7 @@ def load_config(path: Optional[Path] = None) -> BrainAIConfig:
     config.first_agents = list(raw.get("first_agents", config.first_agents))
     config.authorized_actors = list(raw.get("authorized_actors", config.authorized_actors))
     config.extra = dict(raw.get("extra", {}))
-    return config
+    return _apply_env_data_dir(config)
 
 
 __all__ = ["BOOTSTRAP_ROOT", "DEFAULT_SCC_ROOT", "DEFAULT_AS_OF", "DEFAULT_FIRST_AGENTS",
