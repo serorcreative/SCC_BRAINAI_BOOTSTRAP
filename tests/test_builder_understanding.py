@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from scc_brainai_bootstrap.builder import understanding as U
 from scc_brainai_bootstrap.builder.proposals import ProposalStore
 from scc_brainai_bootstrap.builder.understanding import (
     BRIEF_SCHEMA,
@@ -170,6 +171,100 @@ def test_argv_is_confined_and_structured():
 
 
 # --------------------------------------------------------------------- #
+# RV-1 — diagnostic brut BORNÉ + ASSAINI dans tout fait failed (secret jamais persisté)
+# --------------------------------------------------------------------- #
+_SECRET_KEY = "sk-ant-api03-FAKEfakeVALUE1234567890ABCDEFxyz"
+_SECRET_BEARER = "FAKEBEARERtoken1234567890abcXYZ"
+_SECRET_PWD = "SuperSecretHunter2000Value"
+_SECRET_HEX = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+_SECRET_VALUES = [_SECRET_KEY, _SECRET_BEARER, _SECRET_PWD, _SECRET_HEX]
+
+
+def _failed_fact(*, stdout="", stderr="", envelope=None, exit_code=0, timed_out=False, argv=None):
+    return build_proposal(need=NEED, prompt=build_prompt(NEED), capability="understanding",
+                          adapter="claude_code", model="haiku", envelope=envelope,
+                          exit_code=exit_code, timed_out=timed_out, as_of=AS_OF,
+                          argv=argv, stdout=stdout, stderr=stderr)
+
+
+def test_proposed_fact_has_no_diagnostic():
+    fact = _proposal(_envelope(_VALID_BRIEF))
+    assert fact["status"] == "proposed" and fact["diagnostic"] is None
+
+
+def test_redaction_keeps_monkey_but_masks_sensitive_names():
+    assert U._redact("monkey=value") == "monkey=value"          # nom non sensible → visible
+    for good in ("api_key=value", "token=value", "secret=value",
+                 "password=value", "credential=value"):
+        r = U._redact(good)
+        assert "value" not in r and "[REDACTED]" in r, good     # nom sensible → valeur masquée
+        assert good.split("=")[0] in r                          # le nom reste visible
+
+
+def test_diagnostic_stdout_is_bounded_and_marked():
+    # Remplissage non-hex/non-base64 (espaces) : on teste le BORNAGE, pas la redaction.
+    long = "diagnostic-line " * 100          # ~1600 chars, aucun motif sensible
+    assert len(long) > U._DIAG_MAX
+    d = _failed_fact(stdout=long, timed_out=True)["diagnostic"]["stdout"]
+    assert d is not None and len(d) <= U._DIAG_MAX + 40 and "tronqués" in d
+
+
+def test_home_path_replaced_by_tilde():
+    home = os.environ.get("HOME")
+    assert home, "HOME requis pour ce test"
+    d = _failed_fact(stderr=f"cannot open {home}/x/config.json", timed_out=True)["diagnostic"]
+    assert "~/x/config.json" in d["stderr"] and home not in d["stderr"]
+
+
+def test_fake_secrets_redacted_in_every_stream_and_never_persisted(tmp_path):
+    stdout = f"log line key : {_SECRET_KEY} suite"
+    stderr = f"Authorization: Bearer {_SECRET_BEARER}"
+    env = _envelope(f'{{"password":"{_SECRET_PWD}","hash":"{_SECRET_HEX}"}}', ok=False)  # is_error → failed
+    argv = ["claude", "-p", "brief", "--token", _SECRET_KEY]
+    fact = _failed_fact(stdout=stdout, stderr=stderr, envelope=env, argv=argv)
+    store = ProposalStore(tmp_path / "p.jsonl")
+    store.record(fact)
+    blob = store.path.read_text(encoding="utf-8")               # fait PERSISTÉ (sérialisé)
+    for secret in _SECRET_VALUES:                               # AUCUN champ ne contient le secret
+        assert secret not in blob, f"secret fuité : {secret!r}"
+    d = fact["diagnostic"]
+    assert "[REDACTED-KEY]" in d["stdout"] and "[REDACTED]" in d["stderr"]
+    assert "[REDACTED]" in d["result"] and "[REDACTED-HEX]" in d["result"]
+
+
+def test_nonzero_exit_is_failure_even_with_valid_envelope():
+    fact = _failed_fact(envelope=_envelope(_VALID_BRIEF), exit_code=1, stderr="boom")
+    assert fact["status"] == "failed" and fact["brief"] is None
+    assert "exit non nul (1)" in fact["error"] and fact["diagnostic"]["exit_code"] == 1
+
+
+def test_client_error_without_detail_never_says_success():
+    env = _envelope("peu importe")           # subtype "success" par défaut
+    env["is_error"] = True                   # is_error=true AVEC subtype="success"
+    fact = _failed_fact(envelope=env, exit_code=0)
+    assert fact["status"] == "failed"
+    assert fact["error"] == "erreur client sans détail (voir diagnostic)"
+    assert fact["error"] != "success"
+    assert fact["diagnostic"]["is_error"] is True and fact["diagnostic"]["subtype"] == "success"
+
+
+def test_argv_summary_is_structural_prompt_schema_and_paths():
+    argv = ["/usr/local/bin/claude", "-p", _SECRET_PWD,
+            "--json-schema", '{"x":"' + _SECRET_HEX + '"}',
+            "--auth-token", _SECRET_KEY, "--model", "haiku",
+            "/Users/secretuser/private/key.pem"]
+    summ = _failed_fact(timed_out=True, argv=argv)["diagnostic"]["argv_summary"]
+    assert summ is not None
+    # Valeurs structurellement remplacées :
+    assert "<REDACTED-PROMPT>" in summ and _SECRET_PWD not in summ
+    assert "<REDACTED-SCHEMA>" in summ and _SECRET_HEX not in summ
+    assert "<REDACTED>" in summ and _SECRET_KEY not in summ
+    # Aucun chemin absolu sensible ; forme utile préservée (flags + modèle) :
+    assert "/Users/secretuser" not in summ and "/usr/local/bin/claude" not in summ
+    assert "--model" in summ and "haiku" in summ and "-p" in summ
+
+
+# --------------------------------------------------------------------- #
 # APPEL RÉEL (facturable) — désactivé sauf BRAINAI_JALON_LLM=1 ; AU PLUS 2 appels.
 # Scénario Tâche 4 : appel #1 démontre B1/B3/B4 ; appel #2 (si #1 vert) démontre B2.
 # --------------------------------------------------------------------- #
@@ -187,7 +282,8 @@ def test_real_claude_brief(tmp_path):
         return store.record(build_proposal(
             need=NEED, prompt=out["prompt"], capability="understanding", adapter="claude_code",
             model="haiku", envelope=out["envelope"], exit_code=out["exit_code"],
-            timed_out=out["timed_out"], as_of=as_of))
+            timed_out=out["timed_out"], as_of=as_of,
+            argv=out.get("argv"), stdout=out.get("stdout"), stderr=out.get("stderr")))
 
     # --- Appel réel #1 : B4 (budget avant) + B1 (fait complet) + B3 (un seul fait) ---
     out1 = adapter.propose(NEED, cwd=cwd, budget_remaining_usd=remaining)   # B4 : contrôle avant appel
