@@ -17,12 +17,10 @@ Chemin normal unique : :func:`produce_specification` (validation source → gard
 horodatage réel injectable → fait → enregistrement), **un fait par tentative externe**, **aucun retry**
 (R6). Aucun driver externe ne recompose ces étapes.
 
-**Dépendance réservée (unique) à :mod:`understanding`.** Une seule brique **privée** est réutilisée :
-``understanding._diagnostic`` (diagnostic RV-1 borné + redaction des secrets). Motif : la redaction est
-**sécurité-critique** et doit avoir une **source unique** (dupliquer = risque de divergence → fuite). Le
-coût est, lui, une primitive **locale neutre** (:func:`_cost`), pas une dépendance privée. **Interdiction**
-d'introduire une **troisième** capacité dépendant d'un symbole privé de ``understanding`` avant une
-extraction dédiée (chantier ``builder/_leased.py``, hors périmètre). Stdlib pur.
+**Primitives runtime partagées.** L'enveloppe (``parse_envelope``), le coût honnête (``extract_cost``) et
+le diagnostic RV-1 borné/assaini (``diagnostic``) proviennent de l'API **publique** de
+:mod:`claude_code_runtime` — source unique de la redaction des secrets, sans dépendance à un symbole privé.
+Stdlib pur.
 """
 
 from __future__ import annotations
@@ -34,9 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
-from scc_brainai_bootstrap.builder import understanding as U
+from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
 from scc_brainai_bootstrap.builder.tool_runner import run_confined
-from scc_brainai_bootstrap.builder.understanding import parse_envelope
 from scc_brainai_bootstrap.core.clock import digest
 
 # Schéma **structuré** attendu de la Spécification (sortie forcée par ``--json-schema``). Onze champs
@@ -63,6 +60,8 @@ SPEC_SCHEMA: Dict[str, Any] = {
                  "entities_and_data", "key_journeys", "constraints", "acceptance_criteria",
                  "assumptions", "open_questions", "out_of_scope"],
 }
+
+_SPEC_REQUIRED = tuple(SPEC_SCHEMA["required"])
 
 
 class BriefSourceError(ValueError):
@@ -107,13 +106,6 @@ def build_prompt(brief: Dict[str, Any]) -> str:
     )
 
 
-def _cost(envelope: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Coût **réel** si présent dans l'enveloppe, sinon ``unavailable`` — jamais inventé (primitive neutre)."""
-    if envelope is not None and isinstance(envelope.get("total_cost_usd"), (int, float)):
-        return {"value": float(envelope["total_cost_usd"]), "kind": "real"}
-    return {"value": None, "kind": "unavailable"}
-
-
 def _valid_specification(obj: Any) -> bool:
     """Validation **locale stricte** au schéma : dict, **ensemble EXACT** des clés de ``SPEC_SCHEMA``
     (aucune manquante, **aucune propriété supplémentaire**), ``product_objective`` chaîne, tous les autres
@@ -148,7 +140,7 @@ def build_specification(*, brief_source: Dict[str, Any], prompt: str, capability
     borné assaini. Coût toujours enregistré (réel ou ``unavailable``). ``diagnostic = None`` si ``proposed``.
     N'attribue **aucun** identifiant : c'est le :class:`SpecificationStore` qui l'adresse au contenu."""
     proposal_id, brief = validate_brief_source(brief_source)     # défensif : source cohérente et intacte
-    cost = _cost(envelope)
+    cost = extract_cost(envelope)
     usage = envelope.get("usage") if envelope else None
     prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     brief_sha256 = digest(brief)                                 # empreinte déterministe du Brief source (S2)
@@ -166,9 +158,9 @@ def build_specification(*, brief_source: Dict[str, Any], prompt: str, capability
         "cost": cost,
         "as_of": as_of,
     }
-    # Diagnostic RV-1 — dépendance PRIVÉE RÉSERVÉE (unique) à understanding : source unique de la redaction.
-    diag = U._diagnostic(argv=argv, stdout=stdout, stderr=stderr, exit_code=exit_code,
-                         timed_out=timed_out, envelope=envelope)
+    # Diagnostic RV-1 — API publique claude_code_runtime : source unique de la redaction des secrets.
+    diag = diagnostic(argv=argv, stdout=stdout, stderr=stderr, exit_code=exit_code,
+                      timed_out=timed_out, envelope=envelope)
     nonzero_exit = exit_code is not None and exit_code != 0
     # Échec d'appel : timeout / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
     if (timed_out or envelope is None or nonzero_exit
