@@ -18,6 +18,7 @@ modifié · B4 budget contrôlé AVANT l'appel · B5 réponse invalide = fait ``
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -262,6 +263,24 @@ def test_argv_summary_is_structural_prompt_schema_and_paths():
     # Aucun chemin absolu sensible ; forme utile préservée (flags + modèle) :
     assert "/Users/secretuser" not in summ and "/usr/local/bin/claude" not in summ
     assert "--model" in summ and "haiku" in summ and "-p" in summ
+
+
+# --------------------------------------------------------------------- #
+# T3 (barreau B1) — l'env confiné a une COMPOSITION EXACTE : PATH/LANG (+HOME/USER/LOGNAME si présents)
+# --------------------------------------------------------------------- #
+def test_env_composition_is_exactly_identity_and_no_more():
+    env = ClaudeCodeUnderstandingAdapter()._env()
+    allowed = {"PATH", "LANG"}
+    for k in ("HOME", "USER", "LOGNAME"):
+        if os.environ.get(k):
+            allowed.add(k)
+    assert set(env) == allowed                              # composition EXACTE, rien de plus
+    # Les valeurs d'identité transmises correspondent à l'environnement réel.
+    for k in ("HOME", "USER", "LOGNAME"):
+        if os.environ.get(k):
+            assert env[k] == os.environ[k]
+    # Complément (ne remplace pas l'égalité exacte) : aucun nom de secret/token transmis.
+    assert not any(re.search(r"(?i)token|secret|password|api[_-]?key|credential|bearer", k) for k in env)
 
 
 # --------------------------------------------------------------------- #

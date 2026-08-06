@@ -281,10 +281,15 @@ class ClaudeCodeUnderstandingAdapter:
         ]
 
     def _env(self) -> Dict[str, str]:
-        # Env minimal : HOME est requis pour l'auth de session locale ; rien d'autre de sensible.
+        # Env minimal confiné. HOME + USER/LOGNAME sont requis pour que l'outil **résolve
+        # l'utilisateur** et atteigne sa session (trousseau macOS, ``acct`` utilisateur) — barreau
+        # **B1** de l'échelle d'auth T3, liste minimale **prouvée suffisante**. Aucun secret, aucun
+        # token : l'auth reste **hors-bande** (trousseau), jamais lue ni persistée ici. Cible
+        # industrielle (hors périmètre) : token explicite (CLAUDE_CODE_OAUTH_TOKEN / clé API).
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"), "LANG": "C.UTF-8"}
-        if os.environ.get("HOME"):
-            env["HOME"] = os.environ["HOME"]
+        for k in ("HOME", "USER", "LOGNAME"):
+            if os.environ.get(k):
+                env[k] = os.environ[k]
         return env
 
     def propose(self, need: str, *, cwd: Path, budget_remaining_usd: float) -> Dict[str, Any]:
