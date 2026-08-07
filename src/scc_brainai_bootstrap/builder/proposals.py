@@ -43,14 +43,27 @@ class ProposalStore:
         return self._load_all()
 
     def record(self, fact: Dict[str, Any]) -> Dict[str, Any]:
-        """Ajoute un fait proposition immuable (déjà construit par :func:`build_proposal`)."""
-        stored = dict(fact)
-        stored.setdefault(
-            "proposal_id",
-            short_id("prop", {"capability": fact.get("capability"),
-                              "prompt_sha256": fact.get("prompt_sha256"),
-                              "as_of": fact.get("as_of")}),
-        )
+        """Ajoute un fait proposition immuable (déjà construit par :func:`build_proposal`).
+
+        **Le store adresse lui-même l'identifiant** à partir du **fait complet sans identifiant** : tout
+        ``proposal_id`` fourni par l'appelant est **ignoré** (retiré puis recalculé). L'identifiant dépend
+        du **statut**, du **contenu** (``brief`` en succès, ``diagnostic`` en échec), de la **capacité**, de
+        l'**adaptateur**, du **modèle**, de l'empreinte du **prompt**, du **``pursuit_ref``** (appartenance
+        à la Pursuit) et de l'**horodatage** — deux faits distincts, ou deux Pursuits produisant le même
+        Brief, donnent **deux identifiants distincts**."""
+        stored = {k: v for k, v in fact.items() if k != "proposal_id"}  # id appelant ignoré
+        proposal_id = short_id("prop", {
+            "status": stored.get("status"),
+            "brief": stored.get("brief"),
+            "diagnostic": stored.get("diagnostic"),
+            "capability": stored.get("capability"),
+            "adapter": stored.get("adapter"),
+            "model": stored.get("model"),
+            "prompt_sha256": stored.get("prompt_sha256"),
+            "pursuit_ref": stored.get("pursuit_ref"),
+            "as_of": stored.get("as_of"),
+        })
+        stored = {"proposal_id": proposal_id, **stored}
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(stored, ensure_ascii=False) + "\n")

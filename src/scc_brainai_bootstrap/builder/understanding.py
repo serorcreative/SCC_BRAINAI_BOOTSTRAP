@@ -77,21 +77,24 @@ def build_prompt(need: str) -> str:
 def build_proposal(*, need: str, prompt: str, capability: str, adapter: str, model: str,
                    envelope: Optional[Dict[str, Any]], exit_code: Any, timed_out: bool,
                    as_of: str, argv: Any = None, stdout: Any = None,
-                   stderr: Any = None) -> Dict[str, Any]:
+                   stderr: Any = None, pursuit_ref: Optional[str] = None) -> Dict[str, Any]:
     """Construit un **fait proposition** honnête (pur, testable).
 
     ``proposed`` uniquement si : pas de timeout, ``exit_code == 0`` (ou ``None``), enveloppe lisible,
     non ``is_error``, ``subtype == "success"``, ET Brief conforme. Sinon ``failed`` — sans crash, avec
     ``error`` (jamais ``"success"``) et un ``diagnostic`` brut borné assaini. Coût toujours enregistré
-    (réel ou ``unavailable``). ``diagnostic = None`` sur un fait ``proposed``."""
+    (réel ou ``unavailable``). ``diagnostic = None`` sur un fait ``proposed``. Porte ``fact_type='brief'``
+    et un ``pursuit_ref`` optionnel (ancrage de provenance vers la Pursuit ; ``None`` hors orchestration)."""
     cost = extract_cost(envelope)
     usage = envelope.get("usage") if envelope else None
     prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     base: Dict[str, Any] = {
+        "fact_type": "brief",
         "capability": capability,
         "adapter": adapter,
         "model": model,
         "need": need,
+        "pursuit_ref": pursuit_ref,
         "prompt": prompt,
         "prompt_sha256": prompt_sha256,
         "params": {"output_format": "json", "json_schema": "BRIEF_SCHEMA"},

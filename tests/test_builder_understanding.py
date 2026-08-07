@@ -322,3 +322,74 @@ def test_real_claude_brief(tmp_path):
     assert fact2["status"] == "proposed", f"échec réel #2 : {fact2.get('error')}"
     facts = store.read_all()
     assert len(facts) == 2 and fact1["proposal_id"] != fact2["proposal_id"]        # B2
+
+
+# --------------------------------------------------------------------- #
+# proposal_id + provenance minimale — adressage-contenu, fact_type='brief', pursuit_ref
+# --------------------------------------------------------------------- #
+_VALID_BRIEF_2 = (
+    '{"objective":"Autre objectif produit",'
+    '"context":"Petite structure associative",'
+    '"actors":["Bénévole"],'
+    '"scope":["Animaux"],'
+    '"assumptions":["Usage web interne"],'
+    '"open_questions":["Multi-refuge ?"],'
+    '"constraints":["Budget limité"]}'
+)
+
+
+def _prop(envelope, *, as_of=AS_OF, pursuit_ref=None):
+    return build_proposal(need=NEED, prompt=build_prompt(NEED), capability="understanding",
+                          adapter="claude_code", model="haiku", envelope=envelope,
+                          exit_code=0, timed_out=False, as_of=as_of, pursuit_ref=pursuit_ref)
+
+
+def test_fact_type_is_brief_and_pursuit_ref_default_none():
+    fact = _prop(_envelope(_VALID_BRIEF))
+    assert fact["fact_type"] == "brief"
+    assert fact["pursuit_ref"] is None                       # défaut hors orchestration
+
+
+def test_pursuit_ref_present_when_provided():
+    assert _prop(_envelope(_VALID_BRIEF), pursuit_ref="pursuit_abc")["pursuit_ref"] == "pursuit_abc"
+
+
+def test_caller_supplied_proposal_id_is_ignored(tmp_path):
+    store = ProposalStore(tmp_path / "p.jsonl")
+    forged = dict(_prop(_envelope(_VALID_BRIEF)), proposal_id="prop_FORGERY")
+    stored = store.record(forged)
+    assert stored["proposal_id"] != "prop_FORGERY" and stored["proposal_id"].startswith("prop_")
+
+
+def test_different_brief_content_same_inputs_gives_different_ids(tmp_path):
+    store = ProposalStore(tmp_path / "p.jsonl")
+    f1 = store.record(_prop(_envelope(_VALID_BRIEF)))
+    f2 = store.record(_prop(_envelope(_VALID_BRIEF_2)))       # mêmes need/prompt/as_of, contenu ≠
+    assert f1["brief"] != f2["brief"]
+    assert f1["proposal_id"] != f2["proposal_id"]            # adressé au contenu
+
+
+def test_proposed_vs_failed_same_inputs_gives_different_ids(tmp_path):
+    store = ProposalStore(tmp_path / "p.jsonl")
+    ok = store.record(_prop(_envelope(_VALID_BRIEF)))
+    ko = store.record(_prop(_envelope("pas du JSON")))        # mêmes need/as_of, statut ≠
+    assert ok["status"] == "proposed" and ko["status"] == "failed"
+    assert ok["proposal_id"] != ko["proposal_id"]           # statut/contenu participe à l'id
+
+
+def test_two_pursuits_same_brief_give_different_ids(tmp_path):
+    store = ProposalStore(tmp_path / "p.jsonl")
+    p1 = store.record(_prop(_envelope(_VALID_BRIEF), pursuit_ref="pursuit_1"))
+    p2 = store.record(_prop(_envelope(_VALID_BRIEF), pursuit_ref="pursuit_2"))  # Brief identique
+    assert p1["brief"] == p2["brief"] and p1["as_of"] == p2["as_of"]
+    assert p1["proposal_id"] != p2["proposal_id"]           # pursuit_ref dans l'id → traces distinctes
+
+
+def test_prefix_prop_preserved_and_append_only(tmp_path):
+    store = ProposalStore(tmp_path / "p.jsonl")
+    f1 = store.record(_prop(_envelope(_VALID_BRIEF), pursuit_ref="pursuit_1"))
+    f2 = store.record(_prop(_envelope(_VALID_BRIEF_2), pursuit_ref="pursuit_1"))
+    assert f1["proposal_id"].startswith("prop_") and f2["proposal_id"].startswith("prop_")
+    lines = store.path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2 and len(store.read_all()) == 2    # append-only préservé
+    assert f1["proposal_id"] in lines[0] and f1["proposal_id"] != f2["proposal_id"]
