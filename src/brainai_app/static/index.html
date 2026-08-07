@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrainAI</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0;
+         display: grid; grid-template-columns: 1fr 340px; min-height: 100vh; }
+  main { padding: 28px 32px; display: flex; flex-direction: column; }
+  aside { border-left: 1px solid #8883; padding: 24px 20px; background: #8881; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: #888; margin: 0 0 20px; }
+  #conv { flex: 1; display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; overflow-y: auto; }
+  .msg { padding: 10px 14px; border-radius: 12px; max-width: 82%; white-space: pre-wrap; line-height: 1.45; }
+  .user { align-self: flex-end; background: #3b82f6; color: #fff; }
+  .brain { align-self: flex-start; background: #8882; }
+  .trace { align-self: flex-start; background: transparent; padding: 4px 2px; max-width: 82%; }
+  .trace .line { display: flex; gap: 8px; align-items: center; padding: 3px 0; font-size: 14px; }
+  .trace .line.pending { color: #888; }
+  .dots::after { content: "…"; animation: dots 1.1s steps(4, end) infinite; }
+  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%,100% { content: "…"; } }
+  form { display: flex; gap: 8px; }
+  textarea { flex: 1; resize: vertical; min-height: 54px; padding: 10px 12px; border-radius: 10px;
+             border: 1px solid #8886; font: inherit; background: transparent; color: inherit; }
+  button { padding: 0 18px; border: 0; border-radius: 10px; background: #3b82f6; color: #fff;
+           font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  aside h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #888; margin: 18px 0 8px; }
+  aside h2:first-child { margin-top: 0; }
+  .row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; }
+  .row b { text-align: right; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #8883; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { font-size: 13px; padding: 4px 0; display: flex; gap: 8px; align-items: center; }
+  .ok { color: #16a34a; } .ko { color: #dc2626; } .muted { color: #888; }
+  code { font-size: 11px; color: #888; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bienvenue dans BrainAI</h1>
+  <p class="sub">Que souhaitez-vous créer ?</p>
+  <div id="conv"></div>
+  <form id="f">
+    <textarea id="need" placeholder="Ex. : Je veux créer une application de gestion d'un refuge animalier." autofocus></textarea>
+    <button id="send" type="submit">Envoyer</button>
+  </form>
+</main>
+<aside>
+  <h2>Pursuit</h2>
+  <div class="row"><span>ID</span><b id="p-id" class="muted">—</b></div>
+  <div class="row"><span>État</span><b id="p-state"><span class="pill">—</span></b></div>
+  <div class="row"><span>Attente</span><b id="p-wait" class="muted">—</b></div>
+  <div class="row"><span>Budget</span><b id="p-budget" class="muted">—</b></div>
+  <div class="row"><span>Temps</span><b id="p-time" class="muted">—</b></div>
+  <div class="row"><span>Coût</span><b id="p-cost" class="muted">—</b></div>
+  <h2>Système</h2>
+  <div class="row"><span>BrainAI Version</span><b id="p-brainai" class="muted">—</b></div>
+  <div class="row"><span>Version du contrat</span><b id="p-contract" class="muted">—</b></div>
+  <div class="row"><span>Mode d'exécution</span><b id="p-mode" class="muted">—</b></div>
+  <h2>Facultés exécutées</h2>
+  <ul id="steps"><li class="muted">—</li></ul>
+  <h2>Livrables</h2>
+  <ul id="deliverables"><li class="muted">—</li></ul>
+</aside>
+<script>
+  // Le navigateur ne connaît QUE /v1/pursue et /v1/contract. Jeton reçu via l'URL (handshake dev Web).
+  const TOKEN = new URLSearchParams(location.search).get("t") || "";
+  const $ = (id) => document.getElementById(id);
+  const conv = $("conv");
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function addMsg(text, who) {
+    const d = document.createElement("div");
+    d.className = "msg " + who;
+    d.textContent = text;
+    conv.appendChild(d);
+    conv.scrollTop = conv.scrollHeight;
+    return d;
+  }
+
+  function setPanelMeta(p) {
+    $("p-id").textContent = p.pursuit_id || "—";
+    $("p-state").innerHTML = '<span class="pill">' + (p.state || "—") + "</span>";
+    $("p-wait").textContent = p.wait_reason || "—";
+    $("p-budget").textContent = (p.budget_usd != null ? p.budget_usd + " USD" : "—");
+    $("p-time").textContent = (p.elapsed_ms != null ? p.elapsed_ms + " ms" : "—");
+    const c = p.cost || {};
+    $("p-cost").textContent = (c.value != null ? c.value + " " + (c.kind || "") : "—");
+    if (p.brainai_version) $("p-brainai").textContent = p.brainai_version;
+    if (p.contract_version) $("p-contract").textContent = p.contract_version;
+    if (p.mode) $("p-mode").textContent = p.mode;
+  }
+  function renderStepsPanel(steps) {
+    $("steps").innerHTML = steps.map((s) =>
+      '<li><span class="' + (s.status === "proposed" ? "ok" : s.status === "failed" ? "ko" : "muted") + '">'
+      + (s.status === "proposed" ? "✓" : s.status === "failed" ? "✗" : "•") + "</span>"
+      + "<span>" + s.label + "</span> <code>" + (s.fact_id || s.status) + "</code></li>"
+    ).join("") || '<li class="muted">—</li>';
+  }
+  function renderDeliverables(dels) {
+    $("deliverables").innerHTML = dels.map((d) =>
+      '<li><span class="ok">✓</span> ' + d.label + " <code>" + d.fact_id + "</code></li>"
+    ).join("") || '<li class="muted">—</li>';
+  }
+
+  // === Vue (rendu pur, aucun timing, aucune connaissance de la source). ===
+  function makeView() {
+    let trace = null, pending = null;
+    const doneSteps = [], doneDels = [];
+    return {
+      begin(pursuit) {
+        setPanelMeta(Object.assign({}, pursuit, { state: "active", wait_reason: null, cost: null, elapsed_ms: null }));
+        trace = document.createElement("div"); trace.className = "trace"; conv.appendChild(trace);
+        doneSteps.length = 0; doneDels.length = 0;
+      },
+      stepStart(step) {
+        pending = document.createElement("div"); pending.className = "line pending";
+        pending.innerHTML = '<span>•</span><span>' + step.progress_label + '<span class="dots"></span></span>';
+        trace.appendChild(pending); conv.scrollTop = conv.scrollHeight;
+      },
+      stepDone(step) {
+        const ok = step.status === "proposed";
+        pending.className = "line";
+        pending.innerHTML = '<span class="' + (ok ? "ok" : "ko") + '">' + (ok ? "✓" : "✗") + "</span>"
+          + "<span>" + step.label + (ok ? " terminé" : " — échec") + "</span>";
+        doneSteps.push(step); renderStepsPanel(doneSteps);
+        if (ok) { doneDels.push({ label: step.label, fact_id: step.fact_id }); renderDeliverables(doneDels); }
+        conv.scrollTop = conv.scrollHeight;
+      },
+      finish(pursuit, reply) { addMsg(reply, "brain"); setPanelMeta(pursuit); },
+      error(msg) { addMsg(msg, "brain"); },
+    };
+  }
+
+  // === Source REMPLAÇABLE d'événements. Aujourd'hui : relecture progressive d'un Outcome COMPLET. ===
+  // Demain : une source « live » (SSE/WebSocket) émettra les MÊMES événements → la vue et le pilote ne changent pas.
+  async function* replaySource(vm) {
+    yield { type: "begin", pursuit: vm.pursuit };
+    for (const step of vm.steps) {
+      yield { type: "step:start", step };
+      await sleep(650);
+      yield { type: "step:done", step };
+      if (step.status !== "proposed") { yield { type: "finish", pursuit: vm.pursuit, reply: vm.conversation.reply }; return; }
+      await sleep(300);
+    }
+    yield { type: "finish", pursuit: vm.pursuit, reply: vm.conversation.reply };
+  }
+
+  // === Pilote GÉNÉRIQUE : consomme une source d'événements et met à jour la vue. Indépendant de la source. ===
+  async function drive(source, view) {
+    for await (const ev of source) {
+      if (ev.type === "begin") view.begin(ev.pursuit);
+      else if (ev.type === "step:start") view.stepStart(ev.step);
+      else if (ev.type === "step:done") view.stepDone(ev.step);
+      else if (ev.type === "finish") view.finish(ev.pursuit, ev.reply);
+    }
+  }
+
+  $("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const need = $("need").value.trim();
+    if (!need) return;
+    addMsg(need, "user");
+    $("need").value = "";
+    $("send").disabled = true;
+    const view = makeView();
+    try {
+      const r = await fetch("/v1/pursue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-BrainAI-Token": TOKEN },
+        body: JSON.stringify({ need, mode: "demo" }),
+      });
+      const env = await r.json();
+      if (!r.ok) { view.error("Erreur : " + (env.error || r.status)); return; }
+      // Source d'aujourd'hui : replaySource(Outcome complet). Demain : liveSource(...) — même pilote, même vue.
+      await drive(replaySource(env.data), view);
+    } catch (err) {
+      view.error("Erreur réseau : " + err);
+    } finally {
+      $("send").disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
