@@ -22,8 +22,10 @@ from scc_brainai_bootstrap.builder.brainai import (
     NeedError,
     Outcome,
     RunContext,
+    converse_intent,
     need_intent,
     new_pursuit_id,
+    realize_intent,
     resume_intent,
     validate_intent,
     validate_need,
@@ -109,9 +111,16 @@ def test_resume_intent_references_a_pursuit_and_can_carry_payload():
 
 def test_validate_intent_accepts_supported_and_rejects_others():
     validate_intent(need_intent("un besoin"))
+    validate_intent(converse_intent("bonjour"))                     # 1er tour : sans pursuit_ref
+    validate_intent(converse_intent("suite", pursuit_ref="pursuit_x"))
+    validate_intent(realize_intent("pursuit_x"))
     validate_intent(resume_intent("pursuit_x"))
     for bad in ("pas une intention", Intent(kind=""), Intent(kind="observe"),
-                Intent(kind="resume", pursuit_ref="")):
+                Intent(kind="resume", pursuit_ref=""),
+                Intent(kind="realize", pursuit_ref=""),             # réalisation sans identité
+                Intent(kind="converse", payload=None),              # message absent
+                Intent(kind="converse", payload={"message": "   "}),  # message vide
+                Intent(kind="converse", payload={"message": "ok"}, pursuit_ref="  ")):  # ref vide
         with pytest.raises(IntentError):
             validate_intent(bad)
     with pytest.raises(NeedError):
@@ -128,12 +137,64 @@ def test_new_pursuit_id_mints_for_new_and_refuses_resume():
     assert a.startswith("pursuit_") and a == b and a != c        # déterministe, adressé au contenu
     with pytest.raises(IntentError):
         new_pursuit_id(resume_intent("pursuit_X"), "proj", "t")  # une reprise ne crée JAMAIS d'identité
+    with pytest.raises(IntentError):
+        new_pursuit_id(realize_intent("pursuit_X"), "proj", "t")  # ni une réalisation
+
+
+def test_converse_first_turn_mints_a_pursuit_identity():
+    # Le dialogue EST une Pursuit : le premier message frappe une identité (aucun conversation_id séparé).
+    d = new_pursuit_id(converse_intent("bonjour"), "proj", "2026-08-07T00:00:00+00:00")
+    d2 = new_pursuit_id(converse_intent("bonjour"), "proj", "2026-08-07T00:00:00+00:00")
+    d3 = new_pursuit_id(converse_intent("autre"), "proj", "2026-08-07T00:00:00+00:00")
+    assert d.startswith("pursuit_") and d == d2 and d != d3       # adressé au message
 
 
 def test_resume_keeps_the_same_pursuit_identity():
     pid = new_pursuit_id(need_intent("besoin"), "proj", "2026-08-07T00:00:00+00:00")
     again = resume_intent(pid)
     assert again.pursuit_ref == pid                              # la Pursuit reste la même
+
+
+# ===================================================================== #
+# Conversation = même Pursuit : message dans payload, jamais dans need
+# ===================================================================== #
+def test_converse_intent_carries_message_in_payload_not_need():
+    i = converse_intent("  Je veux réfléchir à un projet  ")
+    assert i.kind == "converse"
+    assert i.payload == {"message": "Je veux réfléchir à un projet"}  # message nettoyé, dans payload
+    assert i.need is None                                             # need reste réservé au genre 'need'
+    assert i.pursuit_ref is None                                      # 1er tour : identité pas encore frappée
+    j = converse_intent("suite", pursuit_ref="  pursuit_abc  ")
+    assert j.pursuit_ref == "pursuit_abc" and j.payload == {"message": "suite"}
+    with pytest.raises(IntentError):                                 # message vide ⇒ IntentError (pas NeedError)
+        converse_intent("   ")
+
+
+def test_realize_intent_targets_the_same_pursuit():
+    r = realize_intent("  pursuit_abc  ")
+    assert r.kind == "realize" and r.pursuit_ref == "pursuit_abc" and r.need is None
+    with pytest.raises(IntentError):
+        realize_intent("")
+
+
+def test_dialogue_then_realization_share_one_pursuit_identity():
+    # Doctrine : Pursuit = unité de cognition. Le dialogue mûrit puis la réalisation s'exécute sur la MÊME identité.
+    pid = new_pursuit_id(converse_intent("un besoin flou"), "proj", "2026-08-07T00:00:00+00:00")
+    assert converse_intent("précision", pursuit_ref=pid).pursuit_ref == pid
+    assert realize_intent(pid).pursuit_ref == pid                    # aucune seconde identité cognitive
+
+
+def test_outcome_can_carry_reply_and_proposal_without_authorizing():
+    # Tour conversationnel : reply + proposal (appréciation) — jamais autoritatif, pursuit_id toujours requis.
+    out = Outcome(state="awaiting", wait_reason="clarification", project_id="p", pursuit_id="pursuit_x",
+                  as_of="t", reply="Peux-tu préciser la cible ?",
+                  proposal={"readiness": "continue"})
+    assert out.reply.startswith("Peux-tu") and out.proposal["readiness"] == "continue"
+    ready = Outcome(state="awaiting", wait_reason="governance", project_id="p", pursuit_id="pursuit_x",
+                    as_of="t", proposal={"readiness": "ready", "matured_need": "Gérer un refuge"})
+    assert ready.proposal["matured_need"] == "Gérer un refuge"       # proposition, PAS une autorisation
+    with pytest.raises(TypeError):                                   # pursuit_id reste obligatoire
+        Outcome(state="active", project_id="p", as_of="t")           # noqa: no pursuit_id
 
 
 # ===================================================================== #
@@ -211,6 +272,26 @@ def test_capabilities_reject_missing_or_non_conforming():
         Capabilities(understanding=_FakeUnderstanding(), specification=_FakeSpecification(), build=object())
 
 
+def test_conversation_capability_is_optional_additive_and_validated():
+    from scc_brainai_bootstrap.builder.conversation import ConversationCapability
+
+    class _FakeConversation:                          # conforme au Protocol de dialogue
+        capability = "conversation"; name = "fake"; model = "fake-model"
+        def propose(self, message, *, history, cwd, budget_remaining_usd):
+            return {"called": False, "envelope": None}
+
+    assert isinstance(_FakeConversation(), ConversationCapability)
+    bare = _caps()                                    # absente ⇒ arc historique intact
+    assert bare.conversation is None and bare.roles() == ("understanding", "specification", "build")
+    withconv = Capabilities(understanding=_FakeUnderstanding(), specification=_FakeSpecification(),
+                            build=_FakeBuild(), conversation=_FakeConversation())
+    assert withconv.conversation is not None
+    assert withconv.roles() == ("understanding", "specification", "build")  # le dialogue n'est pas une étape
+    with pytest.raises(CapabilityInjectionError):     # présente mais non conforme ⇒ refus
+        Capabilities(understanding=_FakeUnderstanding(), specification=_FakeSpecification(),
+                     build=_FakeBuild(), conversation=object())
+
+
 def test_two_distinct_conforming_implementations_are_both_accepted():
     class _OtherUnderstanding(_FakeUnderstanding):
         name = "other"
@@ -282,6 +363,15 @@ def test_pursue_valid_resume_is_accepted_and_reaches_t2_seam():
     assert _all_calls(caps) == 0
 
 
+def test_pursue_converse_and_realize_reach_t2_seam_without_calls():
+    # converse/realize sont VALIDES mais pas encore orchestrés (Tâche 2) : seuil atteint, aucune faculté appelée.
+    caps = _caps(); brain = BrainAI(caps)
+    for intent in (converse_intent("bonjour"), realize_intent("pursuit_abc")):
+        with pytest.raises(NotImplementedError):
+            brain.pursue(intent, context=_ctx())
+    assert _all_calls(caps) == 0
+
+
 # ===================================================================== #
 # Validations pures
 # ===================================================================== #
@@ -304,8 +394,8 @@ def test_public_api_surface():
     assert set(BA.__all__) == {
         "BrainAI", "Capabilities", "RunContext", "Stores", "Outcome", "Intent", "PURSUIT_STATES",
         "BrainAIError", "CapabilityInjectionError", "IntentError", "NeedError", "GovernanceError",
-        "need_intent", "resume_intent", "validate_need", "validate_intent", "validate_run_context",
-        "new_pursuit_id",
+        "need_intent", "converse_intent", "realize_intent", "resume_intent", "validate_need",
+        "validate_intent", "validate_run_context", "new_pursuit_id",
     }
 
 

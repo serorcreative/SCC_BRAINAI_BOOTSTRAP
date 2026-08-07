@@ -47,6 +47,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from scc_brainai_bootstrap.builder.build import BuildCapability, produce_build
+from scc_brainai_bootstrap.builder.conversation import ConversationCapability
 from scc_brainai_bootstrap.builder.specification import SpecificationCapability, produce_specification
 from scc_brainai_bootstrap.builder.understanding import NeedUnderstandingCapability, build_proposal
 from scc_brainai_bootstrap.core.clock import short_id
@@ -80,11 +81,15 @@ class GovernanceError(BrainAIError):
 # --------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class Intent:
-    """**Intention** agnostique aux facultés. ``kind`` (ouvert) identifie le genre. Cette version supporte ``need``
-    (``need`` = besoin en langage naturel) et ``resume`` (``pursuit_ref`` = ``pursuit_id`` d'une poursuite à
-    reprendre). ``payload`` : matière **neutre et optionnelle** du tour suivant (clarification, décision de
-    gouvernance, continuation) — sa structure fine n'est pas conçue ici. Construire via :func:`need_intent` /
-    :func:`resume_intent`."""
+    """**Intention** agnostique aux facultés. ``kind`` (ouvert) identifie le genre. Genres supportés : ``need``
+    (``need`` = besoin en langage naturel), ``converse`` (un **message** de dialogue, porté par
+    ``payload['message']`` — jamais par ``need``), ``realize`` (demander la **réalisation** d'une Pursuit mûrie,
+    ``pursuit_ref`` = son ``pursuit_id``) et ``resume`` (``pursuit_ref`` = ``pursuit_id`` d'une poursuite à
+    reprendre). ``converse``/``realize`` **restent la même Pursuit** : le dialogue et la future réalisation
+    partagent un ``pursuit_id`` (via ``pursuit_ref``) — il n'y a **pas** de seconde identité cognitive. ``payload``
+    : matière **neutre et optionnelle** du tour (message, clarification, décision de gouvernance, continuation) —
+    sa structure fine n'est pas conçue ici. Construire via :func:`need_intent` / :func:`converse_intent` /
+    :func:`realize_intent` / :func:`resume_intent`."""
 
     kind: str
     need: Optional[str] = None
@@ -95,6 +100,25 @@ class Intent:
 def need_intent(text: str) -> Intent:
     """Première intention supportée : un **besoin** en langage naturel (nettoyé, non vide)."""
     return Intent(kind="need", need=validate_need(text))
+
+
+def converse_intent(message: str, *, pursuit_ref: Optional[str] = None) -> Intent:
+    """Intention de **dialogue** : un message en langage naturel. Le message est porté par ``payload['message']``
+    (jamais par ``need``, réservé au genre ``need``). ``pursuit_ref`` optionnel : ``pursuit_id`` de la **même**
+    Pursuit à poursuivre (absent au premier tour ; le moteur frappera alors l'identité)."""
+    if not isinstance(message, str) or not message.strip():
+        raise IntentError("message (chaîne non vide) requis pour une intention 'converse'")
+    ref = pursuit_ref.strip() if isinstance(pursuit_ref, str) and pursuit_ref.strip() else None
+    return Intent(kind="converse", pursuit_ref=ref, payload={"message": message.strip()})
+
+
+def realize_intent(pursuit_id: str) -> Intent:
+    """Intention de **réalisation** d'une Pursuit mûrie : lance l'arc (Brief→Spéc→Manifeste) sur la **même**
+    Pursuit (référence son ``pursuit_id``). Émise **après** confirmation humaine — l'appréciation ``readiness``
+    du dialogue ne l'émet jamais d'elle-même (BrainAI propose, l'humain autorise)."""
+    if not isinstance(pursuit_id, str) or not pursuit_id.strip():
+        raise IntentError("pursuit_id (chaîne non vide) requis pour une intention 'realize'")
+    return Intent(kind="realize", pursuit_ref=pursuit_id.strip())
 
 
 def resume_intent(pursuit_id: str, *, payload: Optional[Dict[str, Any]] = None) -> Intent:
@@ -116,6 +140,7 @@ class Capabilities:
     understanding: NeedUnderstandingCapability
     specification: SpecificationCapability
     build: BuildCapability
+    conversation: Optional[ConversationCapability] = None
 
     def __post_init__(self) -> None:
         for role, value, protocol in (
@@ -126,6 +151,11 @@ class Capabilities:
             if value is None or not isinstance(value, protocol):
                 raise CapabilityInjectionError(
                     f"capacité '{role}' absente ou non conforme à {protocol.__name__}")
+        # Capacité de dialogue : **optionnelle** (additive) — validée seulement si injectée ; son absence ne
+        # rompt pas l'arc historique. ``roles()`` reste inchangé (le dialogue n'est pas une étape du parcours).
+        if self.conversation is not None and not isinstance(self.conversation, ConversationCapability):
+            raise CapabilityInjectionError(
+                "capacité 'conversation' non conforme à ConversationCapability")
 
     def roles(self) -> Tuple[str, ...]:
         """Rôles (facultés louées) injectés, dans l'ordre du parcours courant."""
@@ -174,7 +204,13 @@ class Outcome:
     s'auto-déclare jamais quitte.
 
     Réserve consignée (M2, hors périmètre) : ``need`` (optionnel) et ``artefact`` sont **spécifiques à la première
-    faculté** ; ils rejoindront ``steps`` lors d'un nettoyage ultérieur, sans changer la signature de ``pursue``."""
+    faculté** ; ils rejoindront ``steps`` lors d'un nettoyage ultérieur, sans changer la signature de ``pursue``.
+
+    Tour **conversationnel** (BRAINAI-CONVERSATION-001, additif) : ``reply`` (réponse de dialogue en langage
+    naturel) et ``proposal`` (appréciation de maturité — p. ex. ``{"readiness": "ready", "matured_need": …}``).
+    ``proposal`` est une **proposition cognitive, jamais une autorisation** : la réalisation exige une
+    confirmation humaine explicite (intention ``realize``). Le même ``pursuit_id`` porte dialogue puis
+    réalisation — pas de seconde identité."""
 
     state: str
     project_id: str
@@ -186,6 +222,8 @@ class Outcome:
     artefact: Optional[Dict[str, Any]] = None
     cost_total: Dict[str, Any] = field(default_factory=lambda: {"value": None, "kind": "unavailable"})
     refused: Optional[str] = None
+    reply: Optional[str] = None
+    proposal: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.state not in PURSUIT_STATES:
@@ -209,19 +247,32 @@ def validate_need(need: Any) -> str:
 
 def validate_intent(intent: Any) -> None:
     """Valide une intention — ou lève. Refuse **avant toute frontière** : non-:class:`Intent`, ``kind`` vide, genre
-    non supporté (:class:`IntentError`) ; besoin vide pour ``need`` (:class:`NeedError`) ; ``pursuit_ref`` vide pour
-    ``resume`` (:class:`IntentError`). ``payload`` est opaque (non contraint ici)."""
+    non supporté (:class:`IntentError`) ; besoin vide pour ``need`` (:class:`NeedError`) ; ``payload['message']``
+    vide pour ``converse`` (:class:`IntentError`, **pas** :class:`NeedError` — le message n'est pas un besoin) ;
+    ``pursuit_ref`` vide pour ``realize``/``resume`` (:class:`IntentError`). ``payload`` est par ailleurs opaque."""
     if not isinstance(intent, Intent):
         raise IntentError("intention (Intent) requise")
     if not isinstance(intent.kind, str) or not intent.kind.strip():
         raise IntentError("intent.kind requis (chaîne non vide)")
     if intent.kind == "need":
         validate_need(intent.need)
+    elif intent.kind == "converse":
+        # Le message conversationnel vit dans payload['message'] — jamais dans need (réservé au genre 'need').
+        # Message vide ⇒ IntentError (et non NeedError) : ce n'est pas un besoin mais un tour de dialogue.
+        message = intent.payload.get("message") if isinstance(intent.payload, dict) else None
+        if not isinstance(message, str) or not message.strip():
+            raise IntentError("intention 'converse' : payload['message'] (chaîne non vide) requis")
+        if intent.pursuit_ref is not None and (
+                not isinstance(intent.pursuit_ref, str) or not intent.pursuit_ref.strip()):
+            raise IntentError("intention 'converse' : pursuit_ref, si fourni, doit être une chaîne non vide")
+    elif intent.kind == "realize":
+        if not isinstance(intent.pursuit_ref, str) or not intent.pursuit_ref.strip():
+            raise IntentError("intention 'realize' : référence de poursuite (pursuit_id) requise")
     elif intent.kind == "resume":
         if not isinstance(intent.pursuit_ref, str) or not intent.pursuit_ref.strip():
             raise IntentError("intention 'resume' : référence de poursuite (pursuit_id) requise")
     else:
-        raise IntentError(f"intention non supportée par ARC-PROPOSE-001 : kind={intent.kind!r}")
+        raise IntentError(f"intention non supportée : kind={intent.kind!r}")
 
 
 def validate_run_context(context: Any) -> None:
@@ -241,13 +292,17 @@ def validate_run_context(context: Any) -> None:
 
 def new_pursuit_id(intent: Intent, project_id: str, as_of: str) -> str:
     """Frappe l'identité **stable et adressée au contenu** d'une **nouvelle** Pursuit (préfixe ``pursuit_``).
-    **Refuse** une intention ``resume`` : une reprise ne crée jamais d'identité (réutiliser ``pursuit_ref``).
-    Déterministe : mêmes intention/projet/horodatage → même ``pursuit_id``."""
+    **Refuse** ``resume`` et ``realize`` : ni la reprise ni la réalisation ne créent d'identité — elles réutilisent
+    l'identité existante (``pursuit_ref``). ``converse`` **peut** en frapper une (premier tour de dialogue) ; le
+    message est alors intégré au contenu adressé. Déterministe : mêmes intention/projet/horodatage → même
+    ``pursuit_id``."""
     if not isinstance(intent, Intent):
         raise IntentError("intention (Intent) requise")
-    if intent.kind == "resume":
-        raise IntentError("une reprise ne crée pas d'identité de Pursuit ; réutiliser intent.pursuit_ref")
-    return short_id("pursuit", {"kind": intent.kind, "need": intent.need,
+    if intent.kind in ("resume", "realize"):
+        raise IntentError(
+            "une reprise ou une réalisation ne crée pas d'identité de Pursuit ; réutiliser intent.pursuit_ref")
+    message = intent.payload.get("message") if isinstance(intent.payload, dict) else None
+    return short_id("pursuit", {"kind": intent.kind, "need": intent.need, "message": message,
                                 "project_id": project_id, "as_of": as_of})
 
 
@@ -293,13 +348,13 @@ class BrainAI:
         **s'arrête au premier échec/refus** (aucun retry, un appel max par rung), transporte le **budget total**
         (chaque rung reçoit le reste ; aucun appel si insuffisant) et **agrège honnêtement** le coût. **Ne valide
         rien, ne rend rien officiel** : un succès complet renvoie ``state="awaiting"`` / ``wait_reason="governance"``.
-        Les autres genres (``resume``/``continue``) ne sont pas encore enseignés."""
+        Les autres genres (``converse``/``realize``/``resume``) ne sont pas encore orchestrés (Tâche 2)."""
         validate_intent(intent)
         validate_run_context(context)
         if intent.kind != "need":
             raise NotImplementedError(
-                "ARC-PROPOSE-001 · Tâche 2 : seule l'intention 'need' est orchestrée ; "
-                "resume/continue ne sont pas encore enseignés")
+                "seule l'intention 'need' est orchestrée en Tâche 1 ; converse/realize/resume seront "
+                "enseignés en BRAINAI-CONVERSATION-001 · Tâche 2")
 
         need = intent.need
         project_id = context.project_id
@@ -385,5 +440,5 @@ class BrainAI:
 
 __all__ = ["BrainAI", "Capabilities", "RunContext", "Stores", "Outcome", "Intent", "PURSUIT_STATES",
            "BrainAIError", "CapabilityInjectionError", "IntentError", "NeedError", "GovernanceError",
-           "need_intent", "resume_intent", "validate_need", "validate_intent", "validate_run_context",
-           "new_pursuit_id"]
+           "need_intent", "converse_intent", "realize_intent", "resume_intent", "validate_need",
+           "validate_intent", "validate_run_context", "new_pursuit_id"]
