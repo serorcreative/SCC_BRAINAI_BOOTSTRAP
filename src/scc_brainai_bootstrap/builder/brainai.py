@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from scc_brainai_bootstrap.builder.build import BuildCapability, produce_build
-from scc_brainai_bootstrap.builder.conversation import ConversationCapability
+from scc_brainai_bootstrap.builder.conversation import ConversationCapability, build_turn
 from scc_brainai_bootstrap.builder.specification import SpecificationCapability, produce_specification
 from scc_brainai_bootstrap.builder.understanding import NeedUnderstandingCapability, build_proposal
 from scc_brainai_bootstrap.core.clock import short_id
@@ -181,11 +181,14 @@ class RunContext:
 @dataclass(frozen=True)
 class Stores:
     """Journaux **append-only** des faits produits le long de l'arc (hors ``data/``, **injectés**). Portés par
-    :class:`RunContext` (``stores``) : ``proposals`` (Brief), ``specifications`` (Spéc), ``builds`` (Build)."""
+    :class:`RunContext` (``stores``) : ``proposals`` (Brief), ``specifications`` (Spéc), ``builds`` (Build),
+    ``turns`` (tours de conversation d'une Pursuit). ``turns`` est **optionnel** : requis seulement pour les
+    intentions conversationnelles (``converse``/``realize``) ; l'arc ``need`` historique n'en dépend pas."""
 
     proposals: Any
     specifications: Any
     builds: Any
+    turns: Any = None
 
 
 # --------------------------------------------------------------------- #
@@ -342,26 +345,44 @@ class BrainAI:
         """**Identité publique stable** : poursuivre une **intention** sous gouvernance et renvoyer un
         :class:`Outcome` **non autoritatif** et **identifié** (``pursuit_id``). Signature figée (T1).
 
-        **Tâche 2 — première faculté (``kind="need"``)** : orchestre l'arc ``Need → Understanding →
-        Specification → Build`` **à l'intérieur** de BrainAI. Frappe un ``pursuit_id`` stable, ancre le Brief
-        (``pursuit_ref``), transmet chaque fait ``proposed`` au rung suivant (``brief_ref``/``spec_ref``),
-        **s'arrête au premier échec/refus** (aucun retry, un appel max par rung), transporte le **budget total**
-        (chaque rung reçoit le reste ; aucun appel si insuffisant) et **agrège honnêtement** le coût. **Ne valide
-        rien, ne rend rien officiel** : un succès complet renvoie ``state="awaiting"`` / ``wait_reason="governance"``.
-        Les autres genres (``converse``/``realize``/``resume``) ne sont pas encore orchestrés (Tâche 2)."""
+        Genres orchestrés :
+
+        * ``need`` — frappe un ``pursuit_id`` neuf puis lance l'arc ``Understanding → Specification → Build``.
+        * ``converse`` — **dialogue** au sein d'une Pursuit : le 1ᵉʳ tour frappe l'identité, les suivants la
+          reprennent (``pursuit_ref``). Relit l'historique **côté moteur**, appelle la capacité de dialogue,
+          persiste **un fait tour** append-only, renvoie ``reply`` + ``proposal`` (appréciation ``readiness``).
+          ``continue`` ⇒ ``active`` ; ``ready`` ⇒ ``awaiting``/``confirmation`` avec ``matured_need``. **Ne lance
+          jamais l'arc de lui-même.**
+        * ``realize`` — sur **confirmation humaine** : relit le dernier ``matured_need`` mûri de **cette même**
+          Pursuit (jamais reçu de l'UI) et lance l'arc **sur la même identité** (aucun nouveau ``pursuit_id``).
+
+        Dans tous les cas : **arrêt au premier échec/refus** (aucun retry), budget total transporté (aucun appel
+        si insuffisant), coût **agrégé honnêtement**, **rien rendu officiel** (succès d'arc ⇒ ``governance``)."""
         validate_intent(intent)
         validate_run_context(context)
-        if intent.kind != "need":
-            raise NotImplementedError(
-                "seule l'intention 'need' est orchestrée en Tâche 1 ; converse/realize/resume seront "
-                "enseignés en BRAINAI-CONVERSATION-001 · Tâche 2")
+        if intent.kind == "need":
+            pursuit_id = new_pursuit_id(intent, context.project_id, self._clock())
+            return self._run_arc(intent.need, pursuit_id, context)
+        if intent.kind == "converse":
+            return self._converse(intent, context)
+        if intent.kind == "realize":
+            return self._realize(intent, context)
+        raise NotImplementedError(
+            "intention 'resume' (reprise d'une Pursuit suspendue) pas encore orchestrée")
 
-        need = intent.need
+    # ----------------------------------------------------------------- #
+    # Arc de réalisation — Need/matured_need → Understanding → Specification → Build
+    # ----------------------------------------------------------------- #
+    def _run_arc(self, need: str, pursuit_id: str, context: RunContext) -> Outcome:
+        """Orchestre l'arc sur une identité **donnée** (``pursuit_id``) à partir d'un besoin **donné**. Le besoin
+        vient soit d'une intention ``need`` (identité fraîchement frappée), soit de la **réalisation** d'une
+        Pursuit mûrie (``realize`` : **même** identité, ``need`` = ``matured_need`` relu côté moteur). Ancre le
+        Brief (``pursuit_ref``), enchaîne les rungs, s'arrête au premier échec/refus, agrège le coût. Succès
+        complet ⇒ ``awaiting``/``governance`` (jamais autoritatif)."""
         project_id = context.project_id
         stores = context.stores
         workspace = context.workspace
         clock = self._clock
-        pursuit_id = new_pursuit_id(intent, project_id, clock())
         cwd = workspace.ensure()                 # répertoire confiné (appels texte : aucun fichier écrit)
         remaining = float(context.budget_usd)
         steps: List[Dict[str, Any]] = []
@@ -436,6 +457,93 @@ class BrainAI:
         return Outcome(state="awaiting", wait_reason="governance", project_id=project_id,
                        pursuit_id=pursuit_id, as_of=clock(), need=need, steps=tuple(steps),
                        artefact=build_fact.get("artefact"), cost_total=_cost_total())
+
+    # ----------------------------------------------------------------- #
+    # Dialogue — une conversation EST une Pursuit (même identité, tours append-only)
+    # ----------------------------------------------------------------- #
+    def _converse(self, intent: Intent, context: RunContext) -> Outcome:
+        """Un tour de dialogue au sein d'une Pursuit. 1ᵉʳ tour : frappe le ``pursuit_id`` ; suivants : reprennent
+        ``pursuit_ref``. Relit l'historique **côté moteur**, appelle la capacité de dialogue (garde budget avant
+        frontière, aucun retry), persiste **un fait tour** append-only, puis renvoie ``reply`` + ``proposal``.
+        **Ne lance jamais l'arc** : la réalisation exige une intention ``realize`` (confirmation humaine)."""
+        cap = self._capabilities.conversation
+        if cap is None:
+            raise CapabilityInjectionError("capacité 'conversation' requise pour l'intention 'converse'")
+        project_id = context.project_id
+        stores = context.stores
+        clock = self._clock
+        turn_store = self._require_turns(stores)
+        message = intent.payload["message"]
+        pursuit_id = intent.pursuit_ref or new_pursuit_id(intent, project_id, clock())
+        history = self._history(turn_store, pursuit_id)
+        cwd = context.workspace.ensure()
+        remaining = float(context.budget_usd)
+
+        raw = cap.propose(message, history=history, cwd=cwd, budget_remaining_usd=remaining)
+        if not raw.get("called"):                       # refus budgétaire avant frontière : aucun appel, aucun fait
+            return Outcome(state="terminal", project_id=project_id, pursuit_id=pursuit_id, as_of=clock(),
+                           refused=raw.get("refused"), cost_total={"value": 0.0, "kind": "real"})
+        turn_fact = turn_store.record(build_turn(
+            message=message, prompt=raw["prompt"], capability=cap.capability, adapter=cap.name,
+            model=getattr(cap, "model", None), envelope=raw["envelope"], exit_code=raw["exit_code"],
+            timed_out=raw["timed_out"], as_of=clock(), argv=raw.get("argv"),
+            stdout=raw.get("stdout"), stderr=raw.get("stderr"), pursuit_ref=pursuit_id))
+        cost_total = turn_fact.get("cost") if isinstance(turn_fact.get("cost"), dict) else \
+            {"value": None, "kind": "unavailable"}
+        if turn_fact["status"] != "proposed":           # tour raté : trace conservée, Pursuit terminale
+            return Outcome(state="terminal", project_id=project_id, pursuit_id=pursuit_id, as_of=clock(),
+                           refused=turn_fact.get("error"), cost_total=cost_total)
+
+        reply = turn_fact["reply"]
+        if turn_fact.get("readiness") == "ready":        # appréciation « mûr » : PROPOSITION, jamais autorisation
+            return Outcome(state="awaiting", wait_reason="confirmation", project_id=project_id,
+                           pursuit_id=pursuit_id, as_of=clock(), reply=reply, cost_total=cost_total,
+                           proposal={"readiness": "ready", "matured_need": turn_fact.get("matured_need")})
+        return Outcome(state="active", project_id=project_id, pursuit_id=pursuit_id, as_of=clock(),
+                       reply=reply, cost_total=cost_total, proposal={"readiness": "continue"})
+
+    def _realize(self, intent: Intent, context: RunContext) -> Outcome:
+        """**Confirmation humaine** de réalisation. Relit le dernier ``matured_need`` mûri de **cette** Pursuit
+        (jamais reçu de l'UI), puis lance l'arc **sur la même identité** (aucun nouveau ``pursuit_id``). Sans
+        proposition mûrie relue, refuse sans rien lancer."""
+        project_id = context.project_id
+        clock = self._clock
+        turn_store = self._require_turns(context.stores)
+        pursuit_id = intent.pursuit_ref
+        matured = self._last_matured_need(turn_store, pursuit_id)
+        if not matured:
+            return Outcome(state="terminal", project_id=project_id, pursuit_id=pursuit_id, as_of=clock(),
+                           refused="aucune proposition mûrie à réaliser", cost_total={"value": 0.0, "kind": "real"})
+        return self._run_arc(matured, pursuit_id, context)   # MÊME identité, provenance conservée
+
+    # ----- Relecture d'historique côté moteur (jamais reconstruit par l'UI) ----- #
+    @staticmethod
+    def _require_turns(stores: Any) -> Any:
+        turns = getattr(stores, "turns", None)
+        if turns is None:
+            raise GovernanceError("stores.turns (journal des tours) requis pour une intention conversationnelle")
+        return turns
+
+    @staticmethod
+    def _history(turn_store: Any, pursuit_id: str) -> List[Dict[str, Any]]:
+        """Historique de la Pursuit, ordre d'append (chronologique), tours réussis seulement, en paires
+        ``{role: user|assistant}`` — exactement la forme attendue par ``build_prompt``."""
+        history: List[Dict[str, Any]] = []
+        for turn in turn_store.read_all():
+            if turn.get("pursuit_ref") == pursuit_id and turn.get("status") == "proposed":
+                history.append({"role": "user", "content": turn.get("message", "")})
+                history.append({"role": "assistant", "content": turn.get("reply", "")})
+        return history
+
+    @staticmethod
+    def _last_matured_need(turn_store: Any, pursuit_id: str) -> Optional[str]:
+        """Dernier ``matured_need`` d'un tour ``ready`` de cette Pursuit (dernier gagne : ordre chronologique)."""
+        matured: Optional[str] = None
+        for turn in turn_store.read_all():
+            if (turn.get("pursuit_ref") == pursuit_id and turn.get("status") == "proposed"
+                    and turn.get("readiness") == "ready" and turn.get("matured_need")):
+                matured = turn["matured_need"]
+        return matured
 
 
 __all__ = ["BrainAI", "Capabilities", "RunContext", "Stores", "Outcome", "Intent", "PURSUIT_STATES",

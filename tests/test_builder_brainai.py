@@ -354,21 +354,12 @@ def test_pursue_refuses_non_runcontext():
 
 
 # ===================================================================== #
-# pursue — entrée valide : seuil Tâche 2 (aucune orchestration en T1)
+# pursue — resume reste au seuil (non encore orchestré) ; converse/realize : voir section CONVERSATION T2
 # ===================================================================== #
-def test_pursue_valid_resume_is_accepted_and_reaches_t2_seam():
+def test_pursue_valid_resume_is_accepted_and_reaches_seam():
     caps = _caps(); brain = BrainAI(caps)
     with pytest.raises(NotImplementedError):
         brain.pursue(resume_intent("pursuit_abc"), context=_ctx())
-    assert _all_calls(caps) == 0
-
-
-def test_pursue_converse_and_realize_reach_t2_seam_without_calls():
-    # converse/realize sont VALIDES mais pas encore orchestrés (Tâche 2) : seuil atteint, aucune faculté appelée.
-    caps = _caps(); brain = BrainAI(caps)
-    for intent in (converse_intent("bonjour"), realize_intent("pursuit_abc")):
-        with pytest.raises(NotImplementedError):
-            brain.pursue(intent, context=_ctx())
     assert _all_calls(caps) == 0
 
 
@@ -547,3 +538,154 @@ def test_pursue_never_official_and_no_data_touch(tmp_path):
     assert out.state == "awaiting"                                  # jamais 'official'/'validated'
     produced = sorted(p.name for p in tmp_path.rglob("*") if p.is_file())
     assert produced == ["build.jsonl", "manifest.json", "prop.jsonl", "spec.jsonl"]  # rien hors tmp injecté
+
+
+# ===================================================================== #
+# TÂCHE 2 — CONVERSATION : une conversation EST une Pursuit (dialogue → réalisation, même identité)
+# ===================================================================== #
+from scc_brainai_bootstrap.builder.turns import TurnStore  # noqa: E402
+
+
+class _ConvCap:
+    """Capacité de dialogue **factice** : consomme une enveloppe par tour, mémorise l'historique reçu et
+    garde le budget (comme l'adaptateur réel : refus AVANT frontière si le reste ne couvre pas le plafond)."""
+
+    capability = "conversation"; name = "claude_code"; model = "fake-model"
+
+    def __init__(self, envelopes, *, floor=0.50):
+        self._envelopes = list(envelopes); self._floor = floor
+        self.calls = 0; self.seen_history = []
+
+    def propose(self, message, *, history, cwd, budget_remaining_usd):
+        self.calls += 1
+        self.seen_history.append(list(history))
+        if budget_remaining_usd < self._floor:
+            return {"called": False, "refused": "budget insuffisant", "envelope": None, "exit_code": None,
+                    "timed_out": False, "prompt": "p:" + message, "argv": ["claude"],
+                    "stdout": None, "stderr": None}
+        env = self._envelopes[min(self.calls - 1, len(self._envelopes) - 1)]
+        return {"called": True, "envelope": env, "exit_code": 0, "timed_out": False,
+                "prompt": "p:" + message, "argv": ["claude", "-p", message], "stdout": "out", "stderr": ""}
+
+
+def _turn_env(reply, readiness, matured=None):
+    obj = {"reply": reply, "readiness": readiness}
+    if matured is not None:
+        obj["matured_need"] = matured
+    return _env(obj)
+
+
+def _caps_conv(conv, **arc):
+    base = _caps_arc(**arc)
+    return Capabilities(understanding=base.understanding, specification=base.specification,
+                        build=base.build, conversation=conv)
+
+
+def _conv_context(tmp_path, *, budget_usd=5.0):
+    stores = Stores(proposals=ProposalStore(tmp_path / "prop.jsonl"),
+                    specifications=SpecificationStore(tmp_path / "spec.jsonl"),
+                    builds=BuildStore(tmp_path / "build.jsonl"),
+                    turns=TurnStore(tmp_path / "turns.jsonl"))
+    ws = Workspace(tmp_path / "exec-root", "refuge-demo")
+    return RunContext(budget_usd=budget_usd, project_id="refuge-demo", workspace=ws, stores=stores)
+
+
+def _arc_calls(caps):
+    return caps.understanding.calls + caps.specification.calls + caps.build.calls
+
+
+def test_converse_first_turn_dialogues_persists_and_never_realizes(tmp_path):
+    conv = _ConvCap([_turn_env("Peux-tu préciser la cible ?", "continue")])
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    out = brain.pursue(converse_intent("Je veux un truc pour mon refuge"), context=ctx)
+    assert out.state == "active" and out.wait_reason is None          # dialogue vivant
+    assert out.pursuit_id.startswith("pursuit_")
+    assert out.reply == "Peux-tu préciser la cible ?"
+    assert out.proposal == {"readiness": "continue"}
+    assert _arc_calls(caps) == 0 and ctx.stores.proposals.read_all() == []  # l'arc n'est JAMAIS lancé
+    turns = ctx.stores.turns.read_all()                               # un fait tour persisté, rattaché à la Pursuit
+    assert len(turns) == 1 and turns[0]["pursuit_ref"] == out.pursuit_id
+    assert turns[0]["status"] == "proposed" and turns[0]["fact_type"] == "turn"
+    assert turns[0]["message"] == "Je veux un truc pour mon refuge"
+    assert conv.seen_history[0] == []                                 # 1er tour : aucun historique
+
+
+def test_converse_second_turn_reuses_identity_and_reads_history_server_side(tmp_path):
+    conv = _ConvCap([_turn_env("ok, et le périmètre ?", "continue"),
+                     _turn_env("c'est clair", "ready", matured="Gérer un refuge animalier")])
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    out1 = brain.pursue(converse_intent("premier message"), context=ctx)
+    pid = out1.pursuit_id
+    out2 = brain.pursue(converse_intent("deuxième message", pursuit_ref=pid), context=ctx)
+    assert out2.pursuit_id == pid                                     # MÊME Pursuit (aucune 2e identité)
+    assert out2.state == "awaiting" and out2.wait_reason == "confirmation"
+    assert out2.reply == "c'est clair"
+    assert out2.proposal == {"readiness": "ready", "matured_need": "Gérer un refuge animalier"}
+    hist2 = conv.seen_history[1]                                      # historique relu CÔTÉ MOTEUR au 2e tour
+    assert {"role": "user", "content": "premier message"} in hist2
+    assert {"role": "assistant", "content": "ok, et le périmètre ?"} in hist2
+    turns = ctx.stores.turns.read_all()
+    assert len(turns) == 2 and all(t["pursuit_ref"] == pid for t in turns)
+
+
+def test_realize_reads_matured_need_and_runs_arc_on_same_pursuit(tmp_path):
+    conv = _ConvCap([_turn_env("compris", "ready", matured="Une application pour un refuge")])
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    out1 = brain.pursue(converse_intent("besoin encore flou"), context=ctx)
+    pid = out1.pursuit_id
+    assert out1.wait_reason == "confirmation" and _arc_calls(caps) == 0   # rien lancé sans confirmation
+    out2 = brain.pursue(realize_intent(pid), context=ctx)             # CONFIRMATION humaine
+    assert out2.pursuit_id == pid                                     # MÊME identité, aucun nouveau pursuit_id
+    assert out2.state == "awaiting" and out2.wait_reason == "governance"
+    assert [s["faculty"] for s in out2.steps] == ["understanding", "specification", "build"]
+    brief = ctx.stores.proposals.read_all()[0]
+    assert brief["pursuit_ref"] == pid                               # Brief ancré à la MÊME Pursuit
+    assert brief["need"] == "Une application pour un refuge"          # besoin = matured_need relu côté moteur
+    assert realize_intent(pid).payload is None                       # le besoin ne vient JAMAIS de l'UI
+
+
+def test_realize_without_matured_proposal_refuses_without_running_arc(tmp_path):
+    conv = _ConvCap([_turn_env("continue à explorer", "continue")])   # jamais 'ready'
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    out1 = brain.pursue(converse_intent("flou"), context=ctx)
+    out2 = brain.pursue(realize_intent(out1.pursuit_id), context=ctx)
+    assert out2.state == "terminal" and out2.refused == "aucune proposition mûrie à réaliser"
+    assert out2.pursuit_id == out1.pursuit_id and _arc_calls(caps) == 0
+    out3 = brain.pursue(realize_intent("pursuit_inconnu"), context=ctx)  # Pursuit sans aucun tour
+    assert out3.state == "terminal" and out3.refused == "aucune proposition mûrie à réaliser"
+
+
+def test_converse_budget_refused_before_frontier_leaves_no_fact(tmp_path):
+    conv = _ConvCap([_turn_env("x", "continue")], floor=0.50)
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path, budget_usd=0.10)
+    out = brain.pursue(converse_intent("bonjour"), context=ctx)
+    assert out.state == "terminal" and out.refused == "budget insuffisant"
+    assert ctx.stores.turns.read_all() == []                         # aucun fait tour (refus avant frontière)
+
+
+def test_converse_failed_turn_is_terminal_but_traced(tmp_path):
+    conv = _ConvCap([_env("pas du JSON")])                           # tour illisible → failed
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    out = brain.pursue(converse_intent("bonjour"), context=ctx)
+    assert out.state == "terminal" and out.refused == "format tour invalide"
+    turns = ctx.stores.turns.read_all()
+    assert len(turns) == 1 and turns[0]["status"] == "failed"        # échec conservé comme trace
+    # un tour raté n'entre pas dans l'historique ni ne fournit de matured_need
+    assert brain._history(ctx.stores.turns, out.pursuit_id) == []
+
+
+def test_converse_requires_conversation_capability(tmp_path):
+    brain = _brain_arc(_caps_arc()); ctx = _conv_context(tmp_path)   # aucune capacité 'conversation'
+    with pytest.raises(CapabilityInjectionError):
+        brain.pursue(converse_intent("bonjour"), context=ctx)
+
+
+def test_conversational_intents_require_turns_store(tmp_path):
+    conv = _ConvCap([_turn_env("x", "continue")])
+    brain = _brain_arc(_caps_conv(conv))
+    ctx_noturns = _run_context(tmp_path)                             # Stores sans 'turns'
+    with pytest.raises(GovernanceError):
+        brain.pursue(converse_intent("bonjour"), context=ctx_noturns)
+    with pytest.raises(GovernanceError):
+        brain.pursue(realize_intent("pursuit_x"), context=ctx_noturns)
+    assert conv.calls == 0                                           # refus avant tout appel

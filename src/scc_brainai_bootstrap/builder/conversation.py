@@ -15,12 +15,13 @@ Stdlib pur. **Tâche 1 = contrat seul** (aucune orchestration, aucun appel réel
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-from scc_brainai_bootstrap.builder.claude_code_runtime import parse_envelope
+from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
 from scc_brainai_bootstrap.builder.tool_runner import run_confined
 
 # Schéma **structuré** de sortie d'un tour de conversation (forcé par ``--json-schema``). ``reply`` = réponse
@@ -36,6 +37,10 @@ CONVERSATION_SCHEMA: Dict[str, Any] = {
     },
     "required": ["reply", "readiness"],
 }
+
+# Champs requis d'un tour valide + valeurs d'appréciation admises (garde-fou du contrat).
+_TURN_REQUIRED = tuple(CONVERSATION_SCHEMA["required"])
+_READINESS_VALUES = tuple(CONVERSATION_SCHEMA["properties"]["readiness"]["enum"])
 
 
 def build_prompt(message: str, history: List[Dict[str, Any]]) -> str:
@@ -58,6 +63,78 @@ def build_prompt(message: str, history: List[Dict[str, Any]]) -> str:
         + (f"HISTORIQUE :\n{convo}\n\n" if convo else "")
         + f"MESSAGE : {message}"
     )
+
+
+def build_turn(*, message: str, prompt: str, capability: str, adapter: str, model: Optional[str],
+               envelope: Optional[Dict[str, Any]], exit_code: Any, timed_out: bool, as_of: str,
+               argv: Any = None, stdout: Any = None, stderr: Any = None,
+               pursuit_ref: Optional[str] = None) -> Dict[str, Any]:
+    """Construit un **fait tour** honnête (pur, testable) — miroir de :func:`build_proposal`.
+
+    ``proposed`` uniquement si : pas de timeout, ``exit_code == 0`` (ou ``None``), enveloppe lisible, non
+    ``is_error``, ``subtype == "success"``, ET tour conforme (``reply`` chaîne, ``readiness`` ∈ enum). Sinon
+    ``failed`` — sans crash, avec ``error`` (jamais ``"success"``) et un ``diagnostic`` brut borné assaini.
+    Coût toujours enregistré (réel ou ``unavailable``). ``diagnostic = None`` sur un fait ``proposed``. Porte
+    ``fact_type='turn'`` et un ``pursuit_ref`` (ancrage de provenance vers la Pursuit). **Ne construit rien**
+    (aucun brief/spéc/manifeste) : un tour n'est que du dialogue et une **appréciation** de maturité."""
+    cost = extract_cost(envelope)
+    usage = envelope.get("usage") if envelope else None
+    prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    base: Dict[str, Any] = {
+        "fact_type": "turn",
+        "capability": capability,
+        "adapter": adapter,
+        "model": model,
+        "message": message,
+        "pursuit_ref": pursuit_ref,
+        "prompt": prompt,
+        "prompt_sha256": prompt_sha256,
+        "params": {"output_format": "json", "json_schema": "CONVERSATION_SCHEMA"},
+        "usage": usage if usage is not None else "unavailable",
+        "cost": cost,
+        "as_of": as_of,
+    }
+    diag = diagnostic(argv=argv, stdout=stdout, stderr=stderr, exit_code=exit_code,
+                      timed_out=timed_out, envelope=envelope)
+    nonzero_exit = exit_code is not None and exit_code != 0
+    # Échec d'appel : timeout / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
+    if (timed_out or envelope is None or nonzero_exit
+            or envelope.get("is_error") or envelope.get("subtype") != "success"):
+        if timed_out:
+            reason = "timeout"
+        elif envelope is None:
+            reason = "enveloppe illisible"
+        elif nonzero_exit:
+            reason = f"exit non nul ({exit_code})"
+        elif envelope.get("is_error") and envelope.get("subtype") == "success":
+            reason = "erreur client sans détail (voir diagnostic)"
+        else:
+            reason = str(envelope.get("api_error_status") or envelope.get("subtype") or "erreur d'appel")
+        if reason == "success":     # garde-fou : ``error`` ne peut jamais afficher "success"
+            reason = "erreur client sans détail (voir diagnostic)"
+        return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
+                "error": reason, "diagnostic": diag}
+    # Réponse présente : valider le format du tour.
+    result = envelope.get("result")
+    turn: Optional[Dict[str, Any]] = None
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, dict):
+                turn = parsed
+        except json.JSONDecodeError:
+            turn = None
+    elif isinstance(result, dict):
+        turn = result
+    valid = (isinstance(turn, dict) and all(k in turn for k in _TURN_REQUIRED)
+             and isinstance(turn.get("reply"), str) and turn.get("readiness") in _READINESS_VALUES)
+    if not valid:
+        return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
+                "error": "format tour invalide", "diagnostic": diag}
+    matured = turn.get("matured_need")
+    matured = matured if isinstance(matured, str) and matured.strip() else None
+    return {**base, "status": "proposed", "reply": turn["reply"], "readiness": turn["readiness"],
+            "matured_need": matured, "error": None, "diagnostic": None}
 
 
 @runtime_checkable
@@ -129,4 +206,5 @@ class ClaudeCodeConversationAdapter:
                 "stdout": result["stdout"], "stderr": result["stderr"]}
 
 
-__all__ = ["CONVERSATION_SCHEMA", "build_prompt", "ConversationCapability", "ClaudeCodeConversationAdapter"]
+__all__ = ["CONVERSATION_SCHEMA", "build_prompt", "build_turn", "ConversationCapability",
+           "ClaudeCodeConversationAdapter"]
