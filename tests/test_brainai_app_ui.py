@@ -69,7 +69,9 @@ def test_run_pursuit_demo_viewmodel():
     assert [s["progress_label"] for s in vm["steps"]] == ["Compréhension", "Spécification", "Construction"]
     assert all(s["status"] == "proposed" for s in vm["steps"])
     assert [d["label"] for d in vm["deliverables"]] == ["Brief", "Specification", "Manifest"]
-    assert vm["conversation"]["need"].startswith("Je veux") and "validation" in vm["conversation"]["reply"]
+    reply = vm["conversation"]["reply"]
+    assert vm["conversation"]["need"].startswith("Je veux")
+    assert "validation" in reply and "officiel" not in reply   # formulation orientée utilisateur
 
 
 def test_deliverables_are_faculty_agnostic():
@@ -100,7 +102,10 @@ def test_get_root_serves_welcome_page(live_server):
     with urllib.request.urlopen(base + "/", timeout=10) as resp:
         html = resp.read().decode("utf-8")
         assert resp.status == 200
-    assert "Bienvenue dans BrainAI" in html and "Que souhaitez-vous créer" in html
+    assert "Bienvenue dans BrainAI" in html and "Que souhaitez-vous obtenir" in html
+    assert "Décrivez simplement ce que vous souhaitez obtenir" in html   # placeholder ouvert
+    assert "<h2>Progression</h2>" in html                                 # intitulé compréhensible
+    assert "deliverable" in html and "@keyframes pop" in html             # livrables mis en évidence + animation
     assert "/v1/pursue" in html and "X-BrainAI-Token" in html
     # composant de dévoilement REMPLAÇABLE (source d'événements swappable) + progressif, sans rechargement
     assert "async function* replaySource" in html and "async function drive" in html and "function makeView" in html

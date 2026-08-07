@@ -34,18 +34,31 @@
   .row b { text-align: right; }
   .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #8883; }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { font-size: 13px; padding: 4px 0; display: flex; gap: 8px; align-items: center; }
+  #steps li { font-size: 13px; padding: 4px 0; display: flex; gap: 8px; align-items: center; }
   .ok { color: #16a34a; } .ko { color: #dc2626; } .muted { color: #888; }
   code { font-size: 11px; color: #888; }
+  /* Livrables — mis en évidence, apparition animée. */
+  #deliverables { display: flex; flex-direction: column; gap: 8px; }
+  #deliverables li.muted { padding: 4px 0; }
+  .deliverable { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600;
+                 padding: 8px 12px; border-radius: 10px;
+                 background: color-mix(in srgb, #16a34a 14%, transparent);
+                 border: 1px solid color-mix(in srgb, #16a34a 45%, transparent);
+                 animation: pop .38s cubic-bezier(.2,.8,.2,1.2); }
+  .deliverable .tick { color: #16a34a; }
+  .deliverable code { margin-left: auto; font-weight: 400; }
+  @keyframes pop { 0% { transform: scale(.92) translateY(4px); opacity: 0; }
+                   60% { transform: scale(1.02); opacity: 1; }
+                   100% { transform: scale(1); } }
 </style>
 </head>
 <body>
 <main>
   <h1>Bienvenue dans BrainAI</h1>
-  <p class="sub">Que souhaitez-vous créer ?</p>
+  <p class="sub">Que souhaitez-vous obtenir ?</p>
   <div id="conv"></div>
   <form id="f">
-    <textarea id="need" placeholder="Ex. : Je veux créer une application de gestion d'un refuge animalier." autofocus></textarea>
+    <textarea id="need" placeholder="Ex. : Une application, une étude, un produit, un scénario, une stratégie, un plan technique… Décrivez simplement ce que vous souhaitez obtenir." autofocus></textarea>
     <button id="send" type="submit">Envoyer</button>
   </form>
 </main>
@@ -61,7 +74,7 @@
   <div class="row"><span>BrainAI Version</span><b id="p-brainai" class="muted">—</b></div>
   <div class="row"><span>Version du contrat</span><b id="p-contract" class="muted">—</b></div>
   <div class="row"><span>Mode d'exécution</span><b id="p-mode" class="muted">—</b></div>
-  <h2>Facultés exécutées</h2>
+  <h2>Progression</h2>
   <ul id="steps"><li class="muted">—</li></ul>
   <h2>Livrables</h2>
   <ul id="deliverables"><li class="muted">—</li></ul>
@@ -101,21 +114,27 @@
       + "<span>" + s.label + "</span> <code>" + (s.fact_id || s.status) + "</code></li>"
     ).join("") || '<li class="muted">—</li>';
   }
-  function renderDeliverables(dels) {
-    $("deliverables").innerHTML = dels.map((d) =>
-      '<li><span class="ok">✓</span> ' + d.label + " <code>" + d.fact_id + "</code></li>"
-    ).join("") || '<li class="muted">—</li>';
+  function appendDeliverable(d) {
+    const ul = $("deliverables");
+    const ph = ul.querySelector("li.muted");
+    if (ph) ul.removeChild(ph);                       // retire le placeholder "—"
+    const li = document.createElement("li");
+    li.className = "deliverable";
+    li.innerHTML = '<span class="tick">✓</span><span>' + d.label + "</span><code>" + d.fact_id + "</code>";
+    ul.appendChild(li);
   }
 
   // === Vue (rendu pur, aucun timing, aucune connaissance de la source). ===
   function makeView() {
     let trace = null, pending = null;
-    const doneSteps = [], doneDels = [];
+    const doneSteps = [];
     return {
       begin(pursuit) {
         setPanelMeta(Object.assign({}, pursuit, { state: "active", wait_reason: null, cost: null, elapsed_ms: null }));
         trace = document.createElement("div"); trace.className = "trace"; conv.appendChild(trace);
-        doneSteps.length = 0; doneDels.length = 0;
+        doneSteps.length = 0;
+        $("steps").innerHTML = '<li class="muted">—</li>';
+        $("deliverables").innerHTML = '<li class="muted">—</li>';
       },
       stepStart(step) {
         pending = document.createElement("div"); pending.className = "line pending";
@@ -128,7 +147,7 @@
         pending.innerHTML = '<span class="' + (ok ? "ok" : "ko") + '">' + (ok ? "✓" : "✗") + "</span>"
           + "<span>" + step.label + (ok ? " terminé" : " — échec") + "</span>";
         doneSteps.push(step); renderStepsPanel(doneSteps);
-        if (ok) { doneDels.push({ label: step.label, fact_id: step.fact_id }); renderDeliverables(doneDels); }
+        if (ok) appendDeliverable({ label: step.label, fact_id: step.fact_id });
         conv.scrollTop = conv.scrollHeight;
       },
       finish(pursuit, reply) { addMsg(reply, "brain"); setPanelMeta(pursuit); },

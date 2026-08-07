@@ -106,7 +106,7 @@ def _reply(outcome: Any) -> str:
         labels = [_LABELS.get(s.get("faculty"), s.get("faculty"))
                   for s in outcome.steps if s.get("status") == "proposed"]
         return ("J'ai produit : " + ", ".join(labels) +
-                ". En attente de votre validation — rien n'est officiel.")
+                ". J'ai terminé — en attente de votre validation.")
     if outcome.refused:
         return "Poursuite arrêtée : " + str(outcome.refused) + "."
     failed = [s for s in outcome.steps if s.get("status") == "failed"]
