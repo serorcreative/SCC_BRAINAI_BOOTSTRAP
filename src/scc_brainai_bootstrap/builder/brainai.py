@@ -46,9 +46,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from scc_brainai_bootstrap.builder.build import BuildCapability
-from scc_brainai_bootstrap.builder.specification import SpecificationCapability
-from scc_brainai_bootstrap.builder.understanding import NeedUnderstandingCapability
+from scc_brainai_bootstrap.builder.build import BuildCapability, produce_build
+from scc_brainai_bootstrap.builder.specification import SpecificationCapability, produce_specification
+from scc_brainai_bootstrap.builder.understanding import NeedUnderstandingCapability, build_proposal
 from scc_brainai_bootstrap.core.clock import short_id
 
 
@@ -146,6 +146,16 @@ class RunContext:
     project_id: str
     workspace: Any
     stores: Any
+
+
+@dataclass(frozen=True)
+class Stores:
+    """Journaux **append-only** des faits produits le long de l'arc (hors ``data/``, **injectés**). Portés par
+    :class:`RunContext` (``stores``) : ``proposals`` (Brief), ``specifications`` (Spéc), ``builds`` (Build)."""
+
+    proposals: Any
+    specifications: Any
+    builds: Any
 
 
 # --------------------------------------------------------------------- #
@@ -275,22 +285,105 @@ class BrainAI:
 
     def pursue(self, intent: Intent, *, context: RunContext) -> Outcome:
         """**Identité publique stable** : poursuivre une **intention** sous gouvernance et renvoyer un
-        :class:`Outcome` **non autoritatif** et **identifié** (``pursuit_id``). Cette signature **ne changera pas**
-        quand de nouvelles facultés ou de nouveaux genres d'intention (``resume``, futur ``continue``…) seront
-        enseignés.
+        :class:`Outcome` **non autoritatif** et **identifié** (``pursuit_id``). Signature figée (T1).
 
-        **Tâche 1 (contrat)** : valide l'intention et le contexte, **refuse avant toute frontière** en cas
-        d'invalidité (:class:`IntentError` / :class:`NeedError` / :class:`GovernanceError`), puis **délègue à la
-        faculté d'orchestration** — **non encore enseignée** (Tâche 2). Aucun appel réel, aucune matérialisation,
-        aucun fait produit."""
+        **Tâche 2 — première faculté (``kind="need"``)** : orchestre l'arc ``Need → Understanding →
+        Specification → Build`` **à l'intérieur** de BrainAI. Frappe un ``pursuit_id`` stable, ancre le Brief
+        (``pursuit_ref``), transmet chaque fait ``proposed`` au rung suivant (``brief_ref``/``spec_ref``),
+        **s'arrête au premier échec/refus** (aucun retry, un appel max par rung), transporte le **budget total**
+        (chaque rung reçoit le reste ; aucun appel si insuffisant) et **agrège honnêtement** le coût. **Ne valide
+        rien, ne rend rien officiel** : un succès complet renvoie ``state="awaiting"`` / ``wait_reason="governance"``.
+        Les autres genres (``resume``/``continue``) ne sont pas encore enseignés."""
         validate_intent(intent)
         validate_run_context(context)
-        raise NotImplementedError(
-            "ARC-PROPOSE-001 · Tâche 2 : la faculté d'orchestration (Need→Understanding→Specification→Build, "
-            "et la reprise gouvernée) n'est pas encore enseignée (contrat seul en Tâche 1)")
+        if intent.kind != "need":
+            raise NotImplementedError(
+                "ARC-PROPOSE-001 · Tâche 2 : seule l'intention 'need' est orchestrée ; "
+                "resume/continue ne sont pas encore enseignés")
+
+        need = intent.need
+        project_id = context.project_id
+        stores = context.stores
+        workspace = context.workspace
+        clock = self._clock
+        pursuit_id = new_pursuit_id(intent, project_id, clock())
+        cwd = workspace.ensure()                 # répertoire confiné (appels texte : aucun fichier écrit)
+        remaining = float(context.budget_usd)
+        steps: List[Dict[str, Any]] = []
+        spent = 0.0
+        incomplete_cost = False
+
+        def _account(cost: Any) -> None:         # somme HONNÊTE : n'ajoute que les coûts réels, jamais inventés
+            nonlocal spent, remaining, incomplete_cost
+            if isinstance(cost, dict) and cost.get("kind") == "real" and isinstance(cost.get("value"), (int, float)):
+                spent += float(cost["value"]); remaining -= float(cost["value"])
+            else:
+                incomplete_cost = True
+
+        def _cost_total() -> Dict[str, Any]:
+            return {"value": spent, "kind": "real" if not incomplete_cost else "partial"}
+
+        def _terminal(refused: Optional[str] = None) -> Outcome:
+            return Outcome(state="terminal", project_id=project_id, pursuit_id=pursuit_id,
+                           as_of=clock(), need=need, steps=tuple(steps),
+                           cost_total=_cost_total(), refused=refused)
+
+        # --- Rung 1 : Understanding (Need → Brief). Pas de wrapper produce_* : la garde budget est dans l'adaptateur.
+        und = self._capabilities.understanding
+        raw = und.propose(need, cwd=cwd, budget_remaining_usd=remaining)
+        if not raw.get("called"):
+            steps.append({"faculty": "understanding", "status": "refused", "refused": raw.get("refused")})
+            return _terminal(refused=raw.get("refused"))
+        brief_fact = stores.proposals.record(build_proposal(
+            need=need, prompt=raw["prompt"], capability=und.capability, adapter=und.name,
+            model=getattr(und, "model", None), envelope=raw["envelope"], exit_code=raw["exit_code"],
+            timed_out=raw["timed_out"], as_of=clock(), argv=raw.get("argv"),
+            stdout=raw.get("stdout"), stderr=raw.get("stderr"), pursuit_ref=pursuit_id))
+        _account(brief_fact.get("cost"))
+        steps.append({"faculty": "understanding", "status": brief_fact["status"],
+                      "fact_id": brief_fact["proposal_id"], "pursuit_ref": brief_fact.get("pursuit_ref"),
+                      "cost": brief_fact.get("cost"), "error": brief_fact.get("error")})
+        if brief_fact["status"] != "proposed":
+            return _terminal()
+
+        # --- Rung 2 : Specification (Brief proposé → Spéc). Provenance : spec.brief_ref == brief.proposal_id.
+        spec_out = produce_specification(brief_source=brief_fact, adapter=self._capabilities.specification,
+                                         store=stores.specifications, budget_remaining_usd=remaining,
+                                         cwd=cwd, clock=clock)
+        if not spec_out["attempted"]:
+            steps.append({"faculty": "specification", "status": "refused", "refused": spec_out.get("refused")})
+            return _terminal(refused=spec_out.get("refused"))
+        spec_fact = spec_out["fact"]
+        _account(spec_fact.get("cost"))
+        steps.append({"faculty": "specification", "status": spec_fact["status"],
+                      "fact_id": spec_fact["specification_id"], "brief_ref": spec_fact.get("brief_ref"),
+                      "cost": spec_fact.get("cost"), "error": spec_fact.get("error")})
+        if spec_fact["status"] != "proposed":
+            return _terminal()
+
+        # --- Rung 3 : Build (Spéc proposée → Manifeste confiné). Provenance : build.spec_ref == spec.specification_id.
+        build_out = produce_build(spec_source=spec_fact, adapter=self._capabilities.build,
+                                  store=stores.builds, workspace=workspace,
+                                  budget_remaining_usd=remaining, cwd=cwd, clock=clock)
+        if not build_out["attempted"]:
+            steps.append({"faculty": "build", "status": "refused", "refused": build_out.get("refused")})
+            return _terminal(refused=build_out.get("refused"))
+        build_fact = build_out["fact"]
+        _account(build_fact.get("cost"))
+        steps.append({"faculty": "build", "status": build_fact["status"],
+                      "fact_id": build_fact["build_id"], "spec_ref": build_fact.get("spec_ref"),
+                      "artefact": build_fact.get("artefact"), "cost": build_fact.get("cost"),
+                      "error": build_fact.get("error")})
+        if build_fact["status"] != "proposed":
+            return _terminal()
+
+        # --- Succès : proposition complète de la Pursuit, EN ATTENTE de gouvernance humaine (jamais autoritatif).
+        return Outcome(state="awaiting", wait_reason="governance", project_id=project_id,
+                       pursuit_id=pursuit_id, as_of=clock(), need=need, steps=tuple(steps),
+                       artefact=build_fact.get("artefact"), cost_total=_cost_total())
 
 
-__all__ = ["BrainAI", "Capabilities", "RunContext", "Outcome", "Intent", "PURSUIT_STATES",
+__all__ = ["BrainAI", "Capabilities", "RunContext", "Stores", "Outcome", "Intent", "PURSUIT_STATES",
            "BrainAIError", "CapabilityInjectionError", "IntentError", "NeedError", "GovernanceError",
            "need_intent", "resume_intent", "validate_need", "validate_intent", "validate_run_context",
            "new_pursuit_id"]

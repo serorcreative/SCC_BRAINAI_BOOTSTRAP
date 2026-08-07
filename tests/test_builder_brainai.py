@@ -275,14 +275,6 @@ def test_pursue_refuses_non_runcontext():
 # ===================================================================== #
 # pursue — entrée valide : seuil Tâche 2 (aucune orchestration en T1)
 # ===================================================================== #
-def test_pursue_valid_need_reaches_t2_seam_without_calling_capabilities():
-    caps = _caps(); brain = BrainAI(caps)
-    with pytest.raises(NotImplementedError) as exc:
-        brain.pursue(need_intent("Une application pour un refuge animalier"), context=_ctx())
-    assert "Tâche 2" in str(exc.value)
-    assert _all_calls(caps) == 0
-
-
 def test_pursue_valid_resume_is_accepted_and_reaches_t2_seam():
     caps = _caps(); brain = BrainAI(caps)
     with pytest.raises(NotImplementedError):
@@ -310,8 +302,158 @@ def test_validate_run_context_accepts_valid_and_rejects_invalid():
 # ===================================================================== #
 def test_public_api_surface():
     assert set(BA.__all__) == {
-        "BrainAI", "Capabilities", "RunContext", "Outcome", "Intent", "PURSUIT_STATES",
+        "BrainAI", "Capabilities", "RunContext", "Stores", "Outcome", "Intent", "PURSUIT_STATES",
         "BrainAIError", "CapabilityInjectionError", "IntentError", "NeedError", "GovernanceError",
         "need_intent", "resume_intent", "validate_need", "validate_intent", "validate_run_context",
         "new_pursuit_id",
     }
+
+
+# ===================================================================== #
+# TÂCHE 2 — orchestration réelle de l'arc Need → Understanding → Specification → Build
+# ===================================================================== #
+import json  # noqa: E402
+from scc_brainai_bootstrap.builder.brainai import Stores  # noqa: E402
+from scc_brainai_bootstrap.builder.proposals import ProposalStore  # noqa: E402
+from scc_brainai_bootstrap.builder.specifications import SpecificationStore  # noqa: E402
+from scc_brainai_bootstrap.builder.builds import BuildStore  # noqa: E402
+from scc_brainai_bootstrap.builder.workspace import Workspace  # noqa: E402
+
+_BRIEF = {"objective": "Gérer un refuge", "context": "Assoc", "actors": ["A"], "scope": ["S"],
+          "assumptions": ["H"], "open_questions": ["Q ?"], "constraints": ["C"]}
+_SPEC = {"product_objective": "App refuge", "users_and_roles": ["U"], "functional_scope": ["F"],
+         "features": ["Fiche"], "entities_and_data": ["Animal"], "key_journeys": ["J"],
+         "constraints": ["C"], "acceptance_criteria": ["AC"], "assumptions": ["H"],
+         "open_questions": ["Q ?"], "out_of_scope": ["Hors"]}
+_MANIFEST = {"name": "Refuge", "summary": "Résumé du produit refuge.", "users": ["U"],
+             "features": ["Fiche"], "entities": ["Animal"]}
+
+
+def _env(result_obj, *, ok=True, cost=0.02):
+    return {"type": "result", "subtype": "success" if ok else "error_max_turns", "is_error": not ok,
+            "api_error_status": None, "num_turns": 1,
+            "result": result_obj if isinstance(result_obj, str) else json.dumps(result_obj, ensure_ascii=False),
+            "total_cost_usd": cost, "usage": {"input_tokens": 10, "output_tokens": 20}}
+
+
+class _ArcCap:
+    """Adaptateur factice paramétrable (compte les appels ; garde budget)."""
+
+    def __init__(self, capability, envelope, *, budget_floor=0.50, cost=0.02, model="fake-model"):
+        self.capability = capability; self.name = "claude_code"; self.model = model
+        self._env = envelope; self._floor = budget_floor; self._cost = cost; self.calls = 0
+
+    def propose(self, _payload, *, cwd, budget_remaining_usd):
+        self.calls += 1
+        if budget_remaining_usd < self._floor:
+            return {"called": False, "refused": "budget insuffisant", "envelope": None, "exit_code": None,
+                    "timed_out": False, "prompt": "p", "argv": ["claude"], "stdout": None, "stderr": None}
+        return {"called": True, "envelope": self._env, "exit_code": 0, "timed_out": False, "prompt": "p",
+                "argv": ["claude", "-p", "x"], "stdout": "out", "stderr": ""}
+
+
+def _caps_arc(*, u_env=None, s_env=None, b_env=None, u_cost=0.02, s_cost=0.02, b_cost=0.02, floor=0.50):
+    u = _ArcCap("understanding", u_env if u_env is not None else _env(_BRIEF, cost=u_cost), budget_floor=floor, cost=u_cost)
+    s = _ArcCap("specification", s_env if s_env is not None else _env(_SPEC, cost=s_cost), budget_floor=floor, cost=s_cost)
+    b = _ArcCap("build", b_env if b_env is not None else _env(_MANIFEST, cost=b_cost), budget_floor=floor, cost=b_cost)
+    return Capabilities(understanding=u, specification=s, build=b)
+
+
+def _run_context(tmp_path, *, budget_usd=5.0):
+    stores = Stores(proposals=ProposalStore(tmp_path / "prop.jsonl"),
+                    specifications=SpecificationStore(tmp_path / "spec.jsonl"),
+                    builds=BuildStore(tmp_path / "build.jsonl"))
+    ws = Workspace(tmp_path / "exec-root", "refuge-demo")
+    return RunContext(budget_usd=budget_usd, project_id="refuge-demo", workspace=ws, stores=stores)
+
+
+def _brain_arc(caps):
+    return BrainAI(caps, clock=lambda: "2026-08-07T00:00:00+00:00")
+
+
+def test_pursue_full_arc_success_awaiting_governance_with_provenance(tmp_path):
+    caps = _caps_arc(); brain = _brain_arc(caps); ctx = _run_context(tmp_path)
+    out = brain.pursue(need_intent("Une application pour un refuge animalier"), context=ctx)
+    # succès complet, NON autoritatif : en attente de gouvernance humaine
+    assert out.state == "awaiting" and out.wait_reason == "governance"
+    assert out.pursuit_id.startswith("pursuit_") and out.artefact is not None
+    # steps ordonnés understanding → specification → build, tous proposed
+    assert [s["faculty"] for s in out.steps] == ["understanding", "specification", "build"]
+    assert all(s["status"] == "proposed" for s in out.steps)
+    # un seul appel par rung (aucun retry)
+    assert caps.understanding.calls == 1 and caps.specification.calls == 1 and caps.build.calls == 1
+    # provenance chaînée reconstructible via les faits enregistrés
+    brief = ctx.stores.proposals.read_all()[0]
+    spec = ctx.stores.specifications.read_all()[0]
+    build = ctx.stores.builds.read_all()[0]
+    assert brief["pursuit_ref"] == out.pursuit_id                    # Brief ancré à la Pursuit
+    assert spec["brief_ref"] == brief["proposal_id"]                 # Spéc → Brief
+    assert build["spec_ref"] == spec["specification_id"]             # Build → Spéc
+    assert build["artefact"]["relative_path"] == "manifest.json"
+    assert (ctx.workspace.path / "manifest.json").exists()          # artefact matérialisé (confiné)
+    # coût total = somme honnête des réels
+    assert out.cost_total["kind"] == "real" and abs(out.cost_total["value"] - 0.06) < 1e-9
+
+
+def test_pursue_stops_at_first_failure_understanding(tmp_path):
+    caps = _caps_arc(u_env=_env("pas du JSON"))                      # Brief invalide → failed
+    brain = _brain_arc(caps); ctx = _run_context(tmp_path)
+    out = brain.pursue(need_intent("besoin"), context=ctx)
+    assert out.state == "terminal"
+    assert [s["faculty"] for s in out.steps] == ["understanding"]
+    assert out.steps[0]["status"] == "failed"
+    assert caps.specification.calls == 0 and caps.build.calls == 0   # STOP au 1er échec, aval non appelé
+    assert ctx.stores.specifications.read_all() == [] and ctx.stores.builds.read_all() == []
+    assert not (ctx.workspace.path / "manifest.json").exists()
+
+
+def test_pursue_stops_at_first_failure_specification(tmp_path):
+    caps = _caps_arc(s_env=_env("pas du JSON"))                      # Spéc invalide → failed
+    brain = _brain_arc(caps); ctx = _run_context(tmp_path)
+    out = brain.pursue(need_intent("besoin"), context=ctx)
+    assert out.state == "terminal"
+    assert [s["faculty"] for s in out.steps] == ["understanding", "specification"]
+    assert out.steps[0]["status"] == "proposed" and out.steps[1]["status"] == "failed"
+    assert caps.build.calls == 0                                     # build non appelé
+    assert ctx.stores.builds.read_all() == []
+
+
+def test_pursue_budget_stops_mid_arc(tmp_path):
+    # budget couvre le rung 1 (coût 0.30) mais pas le plafond du rung 2 (0.50).
+    caps = _caps_arc(u_cost=0.30, floor=0.50)
+    brain = _brain_arc(caps); ctx = _run_context(tmp_path, budget_usd=0.60)
+    out = brain.pursue(need_intent("besoin"), context=ctx)
+    assert out.state == "terminal" and out.refused == "budget insuffisant"
+    assert [s["faculty"] for s in out.steps] == ["understanding", "specification"]
+    assert out.steps[1]["status"] == "refused"
+    assert caps.specification.calls == 1 and caps.build.calls == 0   # spec a refusé AVANT frontière (called=False), build jamais
+    assert ctx.stores.specifications.read_all() == []               # aucun fait spéc
+
+
+def test_pursue_budget_refused_before_any_real_call(tmp_path):
+    caps = _caps_arc(floor=0.50)
+    brain = _brain_arc(caps); ctx = _run_context(tmp_path, budget_usd=0.10)  # < plafond rung 1
+    out = brain.pursue(need_intent("besoin"), context=ctx)
+    assert out.state == "terminal" and out.refused == "budget insuffisant"
+    assert [s["faculty"] for s in out.steps] == ["understanding"] and out.steps[0]["status"] == "refused"
+    assert ctx.stores.proposals.read_all() == []                    # aucun fait produit
+    assert caps.specification.calls == 0 and caps.build.calls == 0
+
+
+def test_cost_total_partial_when_a_rung_cost_unavailable(tmp_path):
+    env_no_cost = _env(_BRIEF); del env_no_cost["total_cost_usd"]    # coût understanding unavailable
+    caps = _caps_arc(u_env=env_no_cost)
+    brain = _brain_arc(caps); ctx = _run_context(tmp_path)
+    out = brain.pursue(need_intent("besoin"), context=ctx)
+    assert out.state == "awaiting"
+    assert out.cost_total["kind"] == "partial"                      # honnête : un coût manquant → partiel
+    assert abs(out.cost_total["value"] - 0.04) < 1e-9               # somme des réels (spec+build)
+
+
+def test_pursue_never_official_and_no_data_touch(tmp_path):
+    # aucun état officiel : facts dans stores injectés (tmp), artefact dans workspace (tmp) ; data/ gardé par conftest.
+    caps = _caps_arc(); brain = _brain_arc(caps); ctx = _run_context(tmp_path)
+    out = brain.pursue(need_intent("besoin"), context=ctx)
+    assert out.state == "awaiting"                                  # jamais 'official'/'validated'
+    produced = sorted(p.name for p in tmp_path.rglob("*") if p.is_file())
+    assert produced == ["build.jsonl", "manifest.json", "prop.jsonl", "spec.jsonl"]  # rien hors tmp injecté
