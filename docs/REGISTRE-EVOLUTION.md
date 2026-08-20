@@ -26,8 +26,8 @@ post-v1 ; brainai-human→J3). **Aucune destination rouverte, aucun arbitrage mo
 | ID | Dette | Date | Origine | Statut | Destination |
 |---|---|---|---|---|---|
 | RS-003 | **D1** — la prose du modèle présume parfois du routage d'une inconnue (« phase suivante »), contraire à D5/A2 | 2026-08-20 | CLOTURE_COGNITIVE-IDENTITY-001.md | `consignée` | Backlog cognition — surveiller sur plusieurs cas avant tout durcissement de mission |
-| RS-004 | **D2** — porosité besoin/contrainte : une contrainte issue d'une solution peut migrer dans `besoin_fondamental` | 2026-08-20 | idem | `planifiée(J1)` | Porter provenance/statut d'un élément via l'extension additive de `ELEMENT` |
-| RS-005 | **D3** — Art.7 : `readiness=ready` (appréciation) émis avant confirmation humaine ; non-conformité à l'observable littéral (substance préservée) | 2026-08-20 | idem | `planifiée(J1, en tête)` | Réconciliation de gouvernance `ready`(appréciation) vs `realize`(confirmation) — **sans modifier la Constitution sans arbitrage** |
+| RS-004 | **D2** — porosité besoin/contrainte : une contrainte issue d'une solution peut migrer dans `besoin_fondamental` | 2026-08-20 | idem | `résolue partielle(J1)` | Provenance émise **par élément** livrée (`ELEMENT.source`) ; provenance au niveau `besoin_fondamental` (chaîne) = résiduel **RS-038** |
+| RS-005 | **D3** — Art.7 : `readiness=ready` (appréciation) émis avant confirmation humaine ; non-conformité à l'observable littéral (substance préservée) | 2026-08-20 | idem | `mécanisme livré(J1)` | Fait `convergence_confirmed` séparé livré (I5 préservé) ; **réconciliation du texte de la Constitution = arbitrage de gouvernance, NON appliqué** |
 | RS-006 | **A2 (dette)** — `COGNITIVE_IDENTITY` et `CONDENSED_IDENTITY` doivent rester sémantiquement synchrones ; aucun test ne le vérifie | 2026-08 | PROMPT_FINAL / clôture | `consignée` | À couvrir lors de la migration identité en donnée gouvernée |
 | RS-007 | **Tâche 3** — missions understanding/specification non exercées en réel (essence injectée non validée sur modèle) | 2026-08-20 | clôture | `consignée` | Chantier corpus |
 | RS-008 | **M7** — `understanding` impose ses 7 champs dès le 1er contact du besoin (tension avec l'écoute libre) | 2026-08 | CARTOGRAPHIE_INTEGRATION_V1_V2.md | `consignée` | Chantier corpus (trancher sur preuves) |
@@ -74,6 +74,14 @@ post-v1 ; brainai-human→J3). **Aucune destination rouverte, aucun arbitrage mo
 | RS-033 | Infra SLO/PRA/Runbook (cf. RS-020) | 2026-08-20 | Plan Directeur | `consignée` | Post-v1 |
 | RS-034 | Grammaire cognitive complète (cf. RS-021) | 2026-08-20 | Plan Directeur | `consignée` | MEMORY-GOVERNED |
 | RS-035 | Clients mobile / desktop | 2026-08-20 | Plan Directeur | `consignée` | Post-v1 |
+
+## 7. Jalon 1 — découvertes tranchées et résiduels
+| ID | Dette / découverte | Date | Origine | Statut | Destination |
+|---|---|---|---|---|---|
+| RS-036 | Découverte Phase A : « **exiger vs accepter** » l'émission des statuts épistémiques | 2026-08-20 | Phase A J1 | `résolue(J1)` — **TRANCHÉ : émission réellement EXIGÉE** (mission ajustée ; prouvé Étage 2) | — |
+| RS-037 | Découverte Phase A : statut **`vérifié`** | 2026-08-20 | Phase A J1 | `résolue(J1)` — **TRANCHÉ : inémettable par le modèle** (exclu de l'enum du schéma), réservé à une attribution SYSTÈME sur vérification réelle | J2+ (attribution système) |
+| RS-038 | Provenance au niveau **`besoin_fondamental`** (chaîne) absente — D2 traité au niveau `ELEMENT` seulement | 2026-08-20 | Phase B J1 | `consignée` | À jalonner (provenance du besoin fondamental) — extension additive future |
+| RS-029↺ | Identité de l'acteur non authentifiée — le fait `convergence_confirmed` la représente honnêtement (`declared`/`verified:false`), **ne la résout pas** | 2026-08-20 | J1 | `consignée` (inchangée) | ADAPTER-CHANNELS / post-septembre |
 
 ---
 
