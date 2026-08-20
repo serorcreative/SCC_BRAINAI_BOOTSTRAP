@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
+from scc_brainai_bootstrap.builder.cognitive_identity import CONDENSED_IDENTITY, compose_prompt
 from scc_brainai_bootstrap.builder.tool_runner import run_confined
 from scc_brainai_bootstrap.core.clock import digest
 
@@ -92,18 +93,26 @@ def build_prompt(brief: Dict[str, Any]) -> str:
     """Prompt déterministe : spécifie **exclusivement** à partir du Brief fourni (sérialisé canonique).
 
     N'invente aucun besoin, ne prend aucune décision d'architecture, ne rédige aucun code, ne planifie
-    aucune réalisation : décrit et cadre le **produit** au niveau spécification."""
+    aucune réalisation : décrit et cadre le **produit** au niveau spécification.
+
+    Préfixé par l'**essence** de l'identité (``CONDENSED_IDENTITY``) via :func:`compose_prompt` : BrainAI
+    nomme ses hypothèses, tranche les choix structurants et tisse les angles morts dans son raisonnement —
+    jamais relégués dans une section décorative. Contrat et :data:`SPEC_SCHEMA` inchangés (T3)."""
     brief_json = json.dumps(brief, sort_keys=True, ensure_ascii=False, indent=2)
-    return (
+    mission = (
         "Tu produis une SPÉCIFICATION produit structurée à partir d'un BRIEF de compréhension déjà "
         "établi. Appuie-toi EXCLUSIVEMENT sur le BRIEF fourni : n'invente aucun besoin, ne contredis "
         "pas le Brief, ne prends aucune décision d'architecture, ne rédige aucun code, ne planifie "
         "aucune réalisation. Réponds UNIQUEMENT via le schéma imposé : objectif produit, utilisateurs "
         "et rôles, périmètre fonctionnel, fonctionnalités attendues, entités et données principales, "
         "parcours essentiels, contraintes, critères d'acceptation, hypothèses, questions ouvertes, "
-        "éléments explicitement hors périmètre.\n\n"
+        "éléments explicitement hors périmètre. Nomme comme telle toute hypothèse faite faute "
+        "d'information. Sur les choix structurants, tranche explicitement plutôt que de rester neutre "
+        "(et si deux options se valent réellement, dis-le). Les angles morts identifiés sont intégrés "
+        "au raisonnement de la spécification, jamais relégués dans une rubrique décorative.\n\n"
         f"BRIEF (source, ne pas contredire) :\n{brief_json}"
     )
+    return compose_prompt(CONDENSED_IDENTITY, mission)
 
 
 def _valid_specification(obj: Any) -> bool:

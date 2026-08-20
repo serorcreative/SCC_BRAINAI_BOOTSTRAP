@@ -28,6 +28,11 @@
   button { padding: 0 18px; border: 0; border-radius: 10px; background: #3b82f6; color: #fff;
            font: inherit; font-weight: 600; cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
+  /* Action de confirmation — proposée par BrainAI, déclenchée par l'humain. */
+  .realize-wrap { background: transparent; padding: 2px 0; }
+  .realize-btn { padding: 10px 18px; border: 0; border-radius: 10px; background: #16a34a; color: #fff;
+                 font: inherit; font-weight: 700; cursor: pointer; }
+  .realize-btn:disabled { opacity: .5; cursor: default; }
   aside h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #888; margin: 18px 0 8px; }
   aside h2:first-child { margin-top: 0; }
   .row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; }
@@ -85,6 +90,7 @@
   const $ = (id) => document.getElementById(id);
   const conv = $("conv");
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let currentPursuitId = null;   // l'UI ne conserve QUE l'identifiant ; l'historique vit côté serveur.
 
   function addMsg(text, who) {
     const d = document.createElement("div");
@@ -179,26 +185,66 @@
     }
   }
 
-  $("f").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const need = $("need").value.trim();
-    if (!need) return;
-    addMsg(need, "user");
-    $("need").value = "";
-    $("send").disabled = true;
+  async function post(body) {
+    const r = await fetch("/v1/pursue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-BrainAI-Token": TOKEN },
+      body: JSON.stringify(body),
+    });
+    return { ok: r.ok, status: r.status, env: await r.json() };
+  }
+
+  // Rendu d'un tour de DIALOGUE : bulle de réponse + panneau. Aucun arc (steps vides). La décision de proposer
+  // la réalisation est prise par le MOTEUR ; l'UI ne fait que refléter wait_reason === "confirmation".
+  function renderConversationalTurn(vm) {
+    const p = vm.pursuit;
+    currentPursuitId = p.pursuit_id || currentPursuitId;   // reprise de la MÊME Pursuit au tour suivant
+    setPanelMeta(p);
+    renderStepsPanel(vm.steps);
+    addMsg(vm.conversation.reply, "brain");
+    removeRealizeAction();
+    if (p.wait_reason === "confirmation") showRealizeAction();
+  }
+
+  function showRealizeAction() {
+    const wrap = document.createElement("div");
+    wrap.className = "msg brain realize-wrap"; wrap.id = "realize-wrap";
+    const b = document.createElement("button");
+    b.id = "realize-btn"; b.type = "button"; b.className = "realize-btn";
+    b.textContent = "Lancer la réalisation";
+    b.addEventListener("click", runRealize);
+    wrap.appendChild(b); conv.appendChild(wrap); conv.scrollTop = conv.scrollHeight;
+  }
+  function removeRealizeAction() { const w = $("realize-wrap"); if (w) w.remove(); }
+
+  // Clic HUMAIN = confirmation. La MÊME Pursuit poursuit vers l'arc, rejoué par la source progressive existante.
+  async function runRealize() {
+    const btn = $("realize-btn"); if (btn) btn.disabled = true;
     const view = makeView();
     try {
-      const r = await fetch("/v1/pursue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-BrainAI-Token": TOKEN },
-        body: JSON.stringify({ need, mode: "demo" }),
-      });
-      const env = await r.json();
-      if (!r.ok) { view.error("Erreur : " + (env.error || r.status)); return; }
-      // Source d'aujourd'hui : replaySource(Outcome complet). Demain : liveSource(...) — même pilote, même vue.
-      await drive(replaySource(env.data), view);
+      const { ok, status, env } = await post({ kind: "realize", pursuit_ref: currentPursuitId, mode: "demo" });
+      if (!ok) { view.error("Erreur : " + (env.error || status)); return; }
+      removeRealizeAction();
+      await drive(replaySource(env.data), view);   // Understanding → Specification → Build, animé
     } catch (err) {
       view.error("Erreur réseau : " + err);
+    }
+  }
+
+  $("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const message = $("need").value.trim();
+    if (!message) return;
+    addMsg(message, "user");
+    $("need").value = "";
+    $("send").disabled = true;
+    removeRealizeAction();                          // un nouveau message remplace une proposition en attente
+    try {
+      const { ok, status, env } = await post({ kind: "converse", message, pursuit_ref: currentPursuitId, mode: "demo" });
+      if (!ok) { addMsg("Erreur : " + (env.error || status), "brain"); return; }
+      renderConversationalTurn(env.data);
+    } catch (err) {
+      addMsg("Erreur réseau : " + err, "brain");
     } finally {
       $("send").disabled = false;
     }

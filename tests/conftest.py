@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,20 @@ from scc_brainai_bootstrap.core.config import BOOTSTRAP_ROOT, load_config
 
 # Vrai répertoire de données du dépôt — aucune suite ne doit jamais l'écrire (isolation stricte).
 REAL_DATA_DIR = BOOTSTRAP_ROOT / "data"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_state_root(tmp_path_factory):
+    """Isolation C5-minimal (A1) : la racine d'état applicative (``BRAINAI_STATE_ROOT``) pointe vers un tmp de
+    session — aucune suite n'écrit dans le ``~/.brainai/state`` réel de l'utilisateur."""
+    root = tmp_path_factory.mktemp("brainai_state")
+    prev = os.environ.get("BRAINAI_STATE_ROOT")
+    os.environ["BRAINAI_STATE_ROOT"] = str(root)
+    yield root
+    if prev is None:
+        os.environ.pop("BRAINAI_STATE_ROOT", None)
+    else:
+        os.environ["BRAINAI_STATE_ROOT"] = prev
 
 
 def _data_fingerprint(root: Path) -> dict[str, str]:

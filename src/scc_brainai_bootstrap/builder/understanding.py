@@ -31,6 +31,7 @@ from scc_brainai_bootstrap.builder.claude_code_runtime import (
     parse_envelope,
     redact,
 )
+from scc_brainai_bootstrap.builder.cognitive_identity import CONDENSED_IDENTITY, compose_prompt
 from scc_brainai_bootstrap.builder.tool_runner import run_confined
 
 # Alias de compatibilité — NON publics (hors ``__all__``). Préservent les noms internes historiques
@@ -63,15 +64,21 @@ _BRIEF_REQUIRED = tuple(BRIEF_SCHEMA["required"])
 
 
 def build_prompt(need: str) -> str:
-    """Prompt déterministe : demande un Brief structuré (aucun secret, aucune donnée fabriquée)."""
-    return (
+    """Prompt déterministe : demande un Brief structuré (aucun secret, aucune donnée fabriquée).
+
+    Préfixé par l'**essence** de l'identité (``CONDENSED_IDENTITY``) via :func:`compose_prompt` — la voix à
+    coût réduit des facultés à sortie structurée : BrainAI reste le chef de projet qui nomme ses hypothèses,
+    même quand la sortie est un schéma. Contrat et :data:`BRIEF_SCHEMA` inchangés (COGNITIVE-IDENTITY-001 T3)."""
+    mission = (
         "Tu produis un BRIEF de compréhension à partir d'un besoin utilisateur en langage naturel. "
         "Réponds UNIQUEMENT via le schéma imposé : objectif reformulé, contexte, acteurs ou "
         "utilisateurs pressentis, périmètre initial, hypothèses, questions ouvertes, contraintes "
         "identifiées. Ne réalise aucune action, ne rédige aucune spécification, ne propose aucune "
-        "décision : décris et cadre le besoin.\n\n"
+        "décision : décris et cadre le besoin. Toute hypothèse faite faute d'information est nommée "
+        "comme telle dans le champ ``assumptions`` — jamais présentée comme un fait.\n\n"
         f"BESOIN : {need}"
     )
+    return compose_prompt(CONDENSED_IDENTITY, mission)
 
 
 def build_proposal(*, need: str, prompt: str, capability: str, adapter: str, model: str,

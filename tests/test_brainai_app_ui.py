@@ -14,8 +14,38 @@ import urllib.request
 
 import pytest
 
-from brainai_app import contract, server
-from brainai_app.composition import run_pursuit, to_viewmodel
+from brainai_app import composition, contract, server
+from brainai_app.composition import converse, realize, run_pursuit, to_viewmodel
+
+
+def _ready_fake_caps() -> "composition.Capabilities":
+    """Capacités de **test** : arc démo 0 € + une conversation qui atteint réellement ``ready`` au 2e tour.
+
+    A3 impose que la démo produit ne simule jamais une compréhension ; les fakes déterministes vivent donc
+    **dans les tests**. On l'injecte en monkeypatchant ``composition._capabilities`` (aucune modification de
+    l'API : le seam reste privé au module). La fake est **sans état** — sa ``readiness`` dépend de l'historique
+    relu côté moteur, jamais d'un compteur d'instance."""
+    from scc_brainai_bootstrap.builder.brainai import Capabilities
+    from brainai_app.composition import _demo_envelope, demo_capabilities
+
+    class _ReadyOnSecondTurn:
+        capability = "conversation"; name = "test-fake"; model = "test-fake"
+
+        def propose(self, message, *, history, cwd, budget_remaining_usd):
+            if not history:
+                obj = {"reply": "Compris. Quel est le périmètre exact ?", "readiness": "continue"}
+            else:
+                first = next((h.get("content") for h in history if h.get("role") == "user"), message)
+                obj = {"reply": "Je reformule votre besoin ; je peux lancer sur confirmation.",
+                       "readiness": "ready",
+                       "matured_need": {"besoin_fondamental": first, "solutions_privilegiees": [],
+                                        "inconnues_nommees": [], "hypotheses_actives": []}}
+            return {"called": True, "envelope": _demo_envelope(obj), "exit_code": 0, "timed_out": False,
+                    "prompt": "(fake)", "argv": ["fake"], "stdout": "", "stderr": ""}
+
+    base = demo_capabilities()
+    return Capabilities(understanding=base.understanding, specification=base.specification,
+                        build=base.build, conversation=_ReadyOnSecondTurn())
 
 
 def _req(url, *, method="GET", token=None, body=None):
@@ -112,6 +142,10 @@ def test_get_root_serves_welcome_page(live_server):
     assert "progress_label" in html and "deliverables" in html and "location.reload" not in html
     # panneau système
     assert "BrainAI Version" in html and "Version du contrat" in html and "Mode d'exécution" in html
+    # dialogue multi-tour : envoie converse, garde le pursuit_id, propose la réalisation, appelle realize
+    assert 'kind: "converse"' in html and 'kind: "realize"' in html
+    assert "currentPursuitId" in html and "pursuit_ref" in html
+    assert "Lancer la réalisation" in html                                # action de confirmation visible
 
 
 def test_contract_endpoint_requires_token(live_server):
@@ -147,4 +181,89 @@ def test_unknown_operation_is_rejected(live_server):
 def test_pursue_empty_need_is_rejected(live_server):
     base, token = live_server
     code, _ = _req(base + "/v1/pursue", method="POST", token=token, body={"need": "   "})
+    assert code == 400
+
+
+# ===================================================================== #
+# Slice CONVERSATION — dialogue multi-tour visible, même Pursuit, réalisation sur confirmation (démo 0 €)
+# ===================================================================== #
+def test_converse_demo_turn1_is_active_and_proposes_nothing_yet():
+    vm = converse("Je veux quelque chose pour mon refuge")
+    p = vm["pursuit"]
+    assert p["state"] == "active" and p["wait_reason"] is None            # dialogue vivant, aucun gate
+    assert p["pursuit_id"].startswith("pursuit_") and p["cost"]["kind"] == "real"
+    assert p["proposal"] == {"readiness": "continue"}                     # appréciation, pas encore mûr
+    assert "aucune cognition" in vm["conversation"]["reply"].lower()      # démo HONNÊTE : rien de compris
+    assert vm["steps"] == [] and vm["deliverables"] == []                 # l'arc n'est jamais lancé
+
+
+def test_demo_conversation_is_honest_and_never_matures():
+    # T4/A3 — le mode démo ne simule JAMAIS une compréhension : ``continue`` toujours, aucune maturité, jamais
+    # « c'est clair pour moi », quelle que soit la longueur de l'échange. Aucune porte de gouvernance ouverte.
+    vm1 = converse("Je veux un système révolutionnaire")
+    pid = vm1["pursuit"]["pursuit_id"]
+    assert vm1["pursuit"]["proposal"] == {"readiness": "continue"}
+    for msg in ("Des précisions", "Encore des précisions", "Et encore"):
+        vm = converse(msg, pursuit_ref=pid)
+        p = vm["pursuit"]
+        assert p["pursuit_id"] == pid
+        assert p["state"] == "active" and p["wait_reason"] is None        # jamais de gate ouvert par la démo
+        assert p["proposal"] == {"readiness": "continue"}                 # jamais mûr
+        assert "clair pour moi" not in vm["conversation"]["reply"].lower()  # aucune usurpation de compréhension
+
+
+def test_converse_turn2_reuses_pursuit_and_reaches_confirmation(monkeypatch):
+    # ready/realize exercés par une FAKE dédiée (la démo produit reste honnête — A3).
+    monkeypatch.setattr(composition, "_capabilities", lambda mode: _ready_fake_caps())
+    vm1 = converse("Je veux un outil pour mon refuge")
+    pid = vm1["pursuit"]["pursuit_id"]
+    vm2 = converse("Gérer les animaux et les adoptants", pursuit_ref=pid)
+    p = vm2["pursuit"]
+    assert p["pursuit_id"] == pid                                         # MÊME Pursuit (identité conservée)
+    assert p["state"] == "awaiting" and p["wait_reason"] == "confirmation"
+    assert p["proposal"]["readiness"] == "ready" and p["proposal"]["matured_need"]
+    assert vm2["deliverables"] == []                                      # toujours pas d'arc avant confirmation
+
+
+def test_realize_runs_arc_on_the_same_pursuit_with_ready_fake(monkeypatch):
+    # ready puis realize exercés par la FAKE dédiée ; le dernier tour EST le tour ready (garde A4-1 satisfaite).
+    monkeypatch.setattr(composition, "_capabilities", lambda mode: _ready_fake_caps())
+    vm1 = converse("Je veux un outil pour mon refuge")
+    pid = vm1["pursuit"]["pursuit_id"]
+    converse("Gérer animaux et adoptants", pursuit_ref=pid)               # atteint readiness=ready (fake)
+    vm3 = realize(pid)                                                    # CONFIRMATION humaine
+    p = vm3["pursuit"]
+    assert p["pursuit_id"] == pid                                         # aucun nouveau pursuit_id
+    assert p["state"] == "awaiting" and p["wait_reason"] == "governance"
+    assert [d["label"] for d in vm3["deliverables"]] == ["Brief", "Specification", "Manifest"]
+
+
+def test_http_converse_then_realize_honest_demo_keeps_one_pursuit_and_refuses(live_server):
+    # Transport HTTP de bout en bout sous démo HONNÊTE : deux tours conservent la Pursuit ; la démo ne mûrit
+    # jamais, donc realize REFUSE honnêtement (aucun besoin mûri) — sans lancer l'arc, même Pursuit conservée.
+    base, token = live_server
+    _, e1 = _req(base + "/v1/pursue", method="POST", token=token,
+                 body={"kind": "converse", "message": "Je veux un outil pour mon refuge"})
+    pid = e1["data"]["pursuit"]["pursuit_id"]
+    assert e1["data"]["pursuit"]["state"] == "active"
+    _, e2 = _req(base + "/v1/pursue", method="POST", token=token,
+                 body={"kind": "converse", "message": "Gérer animaux", "pursuit_ref": pid})
+    assert e2["data"]["pursuit"]["pursuit_id"] == pid                     # session conservée côté serveur
+    assert e2["data"]["pursuit"]["state"] == "active"                     # démo honnête : jamais mûr
+    _, e3 = _req(base + "/v1/pursue", method="POST", token=token,
+                 body={"kind": "realize", "pursuit_ref": pid})
+    assert e3["data"]["pursuit"]["pursuit_id"] == pid                     # MÊME Pursuit
+    assert e3["data"]["pursuit"]["refused"] == "Aucun besoin mûri disponible."  # refus honnête, verbatim
+    assert e3["data"]["deliverables"] == []                              # aucun arc lancé
+
+
+def test_converse_without_message_is_rejected(live_server):
+    base, token = live_server
+    code, _ = _req(base + "/v1/pursue", method="POST", token=token, body={"kind": "converse", "message": "  "})
+    assert code == 400
+
+
+def test_realize_without_pursuit_ref_is_rejected(live_server):
+    base, token = live_server
+    code, _ = _req(base + "/v1/pursue", method="POST", token=token, body={"kind": "realize"})
     assert code == 400

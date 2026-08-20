@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from brainai_app import contract
-from brainai_app.composition import run_pursuit
+from brainai_app.composition import converse, realize, run_pursuit
 
 _STATIC = Path(__file__).resolve().parent / "static"
 SESSION_TOKEN = secrets.token_urlsafe(24)          # jeton de session (ADR-UI-001), régénéré à chaque import
@@ -88,13 +88,29 @@ class _Handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             self._send_json(400, {"error": "corps JSON invalide"}); return
         if operation == "pursue":
-            need = str(payload.get("need") or "").strip()
             mode = payload.get("mode") or "demo"
-            if not need:
-                self._send_json(400, {"error": "champ 'need' requis (non vide)"}); return
             if mode not in ("demo", "real"):
                 self._send_json(400, {"error": "mode invalide (demo|real)"}); return
-            data = run_pursuit(need, mode=mode)
+            # Un seul endpoint, plusieurs genres d'intention. 'need' (défaut) préserve le contrat historique.
+            kind = payload.get("kind") or "need"
+            if kind == "need":
+                need = str(payload.get("need") or "").strip()
+                if not need:
+                    self._send_json(400, {"error": "champ 'need' requis (non vide)"}); return
+                data = run_pursuit(need, mode=mode)
+            elif kind == "converse":
+                message = str(payload.get("message") or "").strip()
+                if not message:
+                    self._send_json(400, {"error": "champ 'message' requis (non vide)"}); return
+                pursuit_ref = str(payload.get("pursuit_ref") or "").strip() or None
+                data = converse(message, pursuit_ref=pursuit_ref, mode=mode)
+            elif kind == "realize":
+                pursuit_ref = str(payload.get("pursuit_ref") or "").strip()
+                if not pursuit_ref:
+                    self._send_json(400, {"error": "champ 'pursuit_ref' requis (non vide)"}); return
+                data = realize(pursuit_ref, mode=mode)
+            else:
+                self._send_json(400, {"error": "kind invalide (need|converse|realize)"}); return
             self._send_json(200, contract.envelope("pursue", data, _now())); return
         self._send_json(404, {"error": "opération non servie"})
 

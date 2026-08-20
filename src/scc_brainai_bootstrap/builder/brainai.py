@@ -47,7 +47,13 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from scc_brainai_bootstrap.builder.build import BuildCapability, produce_build
-from scc_brainai_bootstrap.builder.conversation import ConversationCapability, build_turn
+from scc_brainai_bootstrap.builder.conversation import (
+    ConversationCapability,
+    build_turn,
+    matured_need_present,
+    matured_need_to_need_text,
+    normalize_matured_need,
+)
 from scc_brainai_bootstrap.builder.specification import SpecificationCapability, produce_specification
 from scc_brainai_bootstrap.builder.understanding import NeedUnderstandingCapability, build_proposal
 from scc_brainai_bootstrap.core.clock import short_id
@@ -196,6 +202,22 @@ class Stores:
 # --------------------------------------------------------------------- #
 # Lifecycle de la Pursuit. Une raison d'attente n'ajoute JAMAIS un statut racine : elle vit dans ``wait_reason``.
 PURSUIT_STATES = ("active", "awaiting", "terminal")
+
+# Motifs de refus de ``realize`` (garde de convergence A4-1) — affichés **verbatim** par l'UI, produits
+# exclusivement par le moteur. Trois causes distinctes, jamais confondues :
+#   NONE    : aucune convergence n'a jamais eu lieu (aucun tour ``ready`` mûri dans l'historique).
+#   EVOLVED : une convergence a existé mais un tour ``continue`` postérieur l'a rendue caduque.
+#   FAILED  : le dernier message n'a pas pu être traité (dernier fait turn ``failed``).
+_REALIZE_REFUSED_NONE = "Aucun besoin mûri disponible."
+_REALIZE_REFUSED_EVOLVED = (
+    "La conversation a évolué depuis la dernière convergence. La convergence précédente ne peut donc plus "
+    "être utilisée pour lancer la réalisation. Merci de poursuivre la conversation jusqu'à une nouvelle "
+    "convergence."
+)
+_REALIZE_REFUSED_FAILED = (
+    "Votre dernier message n'a pas pu être traité. Merci de le renvoyer afin que BrainAI puisse confirmer "
+    "ou réviser la convergence avant la réalisation."
+)
 
 
 @dataclass(frozen=True)
@@ -503,18 +525,39 @@ class BrainAI:
                        reply=reply, cost_total=cost_total, proposal={"readiness": "continue"})
 
     def _realize(self, intent: Intent, context: RunContext) -> Outcome:
-        """**Confirmation humaine** de réalisation. Relit le dernier ``matured_need`` mûri de **cette** Pursuit
-        (jamais reçu de l'UI), puis lance l'arc **sur la même identité** (aucun nouveau ``pursuit_id``). Sans
-        proposition mûrie relue, refuse sans rien lancer."""
+        """**Confirmation humaine** de réalisation, sous **garde de convergence** (A4-1).
+
+        Invariant : « La réalisation ne peut partir que depuis une convergence qui est encore le dernier état
+        de convergence validé de la Pursuit. » Le moteur ne raisonne jamais sur la parole, le canal ni le
+        contenu des messages : seule la **chronologie des faits ``turn``** du TurnStore fait autorité pour
+        l'état de convergence. Les faits produits par la réalisation (Brief, Spécification, Manifeste…) ne
+        constituent **jamais** un état de convergence et ne sont jamais lus ici.
+
+        Concrètement, la réalisation ne part que si le **dernier fait ``turn``** de la Pursuit est un tour
+        ``proposed``/``ready`` portant un ``matured_need`` ; tout fait ``turn`` postérieur (``proposed`` ou
+        ``failed``) suspend cette convergence jusqu'à une **revalidation** (un nouveau tour ``ready``). Sinon,
+        refus motivé (motif distinct selon la cause), **sans rien lancer** et sur la **même identité**."""
         project_id = context.project_id
         clock = self._clock
         turn_store = self._require_turns(context.stores)
         pursuit_id = intent.pursuit_ref
-        matured = self._last_matured_need(turn_store, pursuit_id)
-        if not matured:
-            return Outcome(state="terminal", project_id=project_id, pursuit_id=pursuit_id, as_of=clock(),
-                           refused="aucune proposition mûrie à réaliser", cost_total={"value": 0.0, "kind": "real"})
-        return self._run_arc(matured, pursuit_id, context)   # MÊME identité, provenance conservée
+        last = self._last_turn(turn_store, pursuit_id)
+        # Convergence courante : le DERNIER tour est lui-même la convergence mûrie → réalisation autorisée. Le
+        # ``matured_need`` structuré (C9) est aplati en ``need`` textuel typé (A2) pour la chaîne actuelle
+        # (understanding attend une chaîne) ; l'objet structuré reste la vérité dans le fait persisté.
+        if (last is not None and last.get("status") == "proposed"
+                and last.get("readiness") == "ready" and matured_need_present(last.get("matured_need"))):
+            need_text = matured_need_to_need_text(last.get("matured_need"))
+            return self._run_arc(need_text, pursuit_id, context)  # MÊME identité, provenance conservée
+        # Sinon : refus, cause distincte (le moteur ne lit aucun message — il regarde le dernier fait turn).
+        if last is not None and last.get("status") == "failed":
+            refused = _REALIZE_REFUSED_FAILED                     # dernier tour illisible → renvoyer le message
+        elif self._last_matured_need(turn_store, pursuit_id) is not None:
+            refused = _REALIZE_REFUSED_EVOLVED                    # une convergence a existé, mais n'est plus la dernière
+        else:
+            refused = _REALIZE_REFUSED_NONE                       # aucune convergence n'a jamais eu lieu
+        return Outcome(state="terminal", project_id=project_id, pursuit_id=pursuit_id, as_of=clock(),
+                       refused=refused, cost_total={"value": 0.0, "kind": "real"})
 
     # ----- Relecture d'historique côté moteur (jamais reconstruit par l'UI) ----- #
     @staticmethod
@@ -536,14 +579,28 @@ class BrainAI:
         return history
 
     @staticmethod
-    def _last_matured_need(turn_store: Any, pursuit_id: str) -> Optional[str]:
-        """Dernier ``matured_need`` d'un tour ``ready`` de cette Pursuit (dernier gagne : ordre chronologique)."""
-        matured: Optional[str] = None
+    def _last_matured_need(turn_store: Any, pursuit_id: str) -> Optional[Dict[str, Any]]:
+        """Dernier ``matured_need`` **structuré** (C9) d'un tour ``ready`` de cette Pursuit (dernier gagne :
+        ordre chronologique). Validité jugée par le helper unique (jamais la simple truthiness) ; lecture legacy
+        normalisée à la volée. Sert à distinguer « une convergence a existé » de « aucune jamais »."""
+        matured: Optional[Dict[str, Any]] = None
         for turn in turn_store.read_all():
             if (turn.get("pursuit_ref") == pursuit_id and turn.get("status") == "proposed"
-                    and turn.get("readiness") == "ready" and turn.get("matured_need")):
-                matured = turn["matured_need"]
+                    and turn.get("readiness") == "ready" and matured_need_present(turn.get("matured_need"))):
+                matured = normalize_matured_need(turn.get("matured_need"))
         return matured
+
+    @staticmethod
+    def _last_turn(turn_store: Any, pursuit_id: str) -> Optional[Dict[str, Any]]:
+        """**Dernier fait ``turn``** de la Pursuit (tout statut : ``proposed`` ou ``failed``), en ordre d'append
+        (chronologique) — ``None`` si la Pursuit n'a aucun tour. Seuls les faits ``turn`` du TurnStore font
+        autorité sur l'état de convergence : les faits de réalisation ne sont jamais consultés ici (invariant
+        A4-1). C'est la notion de « dernier état » sur laquelle repose la garde de convergence de ``realize``."""
+        last: Optional[Dict[str, Any]] = None
+        for turn in turn_store.read_all():
+            if turn.get("pursuit_ref") == pursuit_id:
+                last = turn
+        return last
 
 
 __all__ = ["BrainAI", "Capabilities", "RunContext", "Stores", "Outcome", "Intent", "PURSUIT_STATES",

@@ -432,3 +432,17 @@ def test_env_composition_is_exactly_identity_and_no_more():
         if os.environ.get(k):
             assert env[k] == os.environ[k]
     assert not any(re.search(r"(?i)token|secret|password|api[_-]?key|credential|bearer", k) for k in env)
+
+
+def test_build_prompt_prefixes_condensed_identity_arbitrates_and_weaves_blind_spots():
+    # COGNITIVE-IDENTITY-001 T3 — la mission specification est préfixée par l'ESSENCE, tranche les choix
+    # structurants (M4) et intègre les angles morts au raisonnement (M6), sans rubrique décorative. Schéma
+    # et contrat inchangés (vérifiés par ailleurs).
+    from scc_brainai_bootstrap.builder.cognitive_identity import CONDENSED_IDENTITY
+    p = build_prompt(SOURCE_BRIEF)
+    assert CONDENSED_IDENTITY[:40] in p and "ta nature" in p.lower()      # essence injectée
+    assert p.index(CONDENSED_IDENTITY[:40]) < p.index("BRIEF (source")    # identité AVANT la tâche
+    assert "SPÉCIFICATION" in p and "EXCLUSIVEMENT" in p                  # consignes historiques conservées
+    assert "tranche explicitement plutôt que de rester neutre" in p       # M4 : arbitrage
+    assert "angles morts identifiés sont intégrés" in p                   # M6 : pas de rubrique décorative
+    assert "hypothèse faite faute d'information" in p                     # M5 : hypothèses nommées

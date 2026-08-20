@@ -393,3 +393,14 @@ def test_prefix_prop_preserved_and_append_only(tmp_path):
     lines = store.path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2 and len(store.read_all()) == 2    # append-only préservé
     assert f1["proposal_id"] in lines[0] and f1["proposal_id"] != f2["proposal_id"]
+
+
+def test_build_prompt_prefixes_condensed_identity_and_names_assumptions():
+    # COGNITIVE-IDENTITY-001 T3 — la mission understanding est préfixée par l'ESSENCE de l'identité, et
+    # demande de nommer les hypothèses comme telles. Schéma et contrat inchangés (vérifiés par ailleurs).
+    from scc_brainai_bootstrap.builder.cognitive_identity import CONDENSED_IDENTITY
+    p = build_prompt(NEED)
+    assert CONDENSED_IDENTITY[:40] in p and "ta nature" in p.lower()      # essence injectée, cadrage nature
+    assert p.index(CONDENSED_IDENTITY[:40]) < p.index("BESOIN :")         # identité AVANT la tâche
+    assert NEED in p and "BRIEF" in p                                     # consignes historiques conservées
+    assert "hypothèse faite faute d'information est nommée" in p          # M5 : hypothèses offertes à correction

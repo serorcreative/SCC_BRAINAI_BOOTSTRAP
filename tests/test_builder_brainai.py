@@ -620,7 +620,11 @@ def test_converse_second_turn_reuses_identity_and_reads_history_server_side(tmp_
     assert out2.pursuit_id == pid                                     # MÊME Pursuit (aucune 2e identité)
     assert out2.state == "awaiting" and out2.wait_reason == "confirmation"
     assert out2.reply == "c'est clair"
-    assert out2.proposal == {"readiness": "ready", "matured_need": "Gérer un refuge animalier"}
+    # matured_need STRUCTURÉ (C9) : la chaîne legacy émise par la fake est normalisée en structure (D3).
+    assert out2.proposal["readiness"] == "ready"
+    assert out2.proposal["matured_need"] == {"besoin_fondamental": "Gérer un refuge animalier",
+                                             "solutions_privilegiees": [], "inconnues_nommees": [],
+                                             "hypotheses_actives": []}
     hist2 = conv.seen_history[1]                                      # historique relu CÔTÉ MOTEUR au 2e tour
     assert {"role": "user", "content": "premier message"} in hist2
     assert {"role": "assistant", "content": "ok, et le périmètre ?"} in hist2
@@ -640,7 +644,8 @@ def test_realize_reads_matured_need_and_runs_arc_on_same_pursuit(tmp_path):
     assert [s["faculty"] for s in out2.steps] == ["understanding", "specification", "build"]
     brief = ctx.stores.proposals.read_all()[0]
     assert brief["pursuit_ref"] == pid                               # Brief ancré à la MÊME Pursuit
-    assert brief["need"] == "Une application pour un refuge"          # besoin = matured_need relu côté moteur
+    # besoin de l'arc = matured_need relu côté moteur, APLATI en texte typé (A2) : le besoin fondamental y figure.
+    assert "Une application pour un refuge" in brief["need"] and "BESOIN FONDAMENTAL" in brief["need"]
     assert realize_intent(pid).payload is None                       # le besoin ne vient JAMAIS de l'UI
 
 
@@ -649,10 +654,82 @@ def test_realize_without_matured_proposal_refuses_without_running_arc(tmp_path):
     caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
     out1 = brain.pursue(converse_intent("flou"), context=ctx)
     out2 = brain.pursue(realize_intent(out1.pursuit_id), context=ctx)
-    assert out2.state == "terminal" and out2.refused == "aucune proposition mûrie à réaliser"
+    assert out2.state == "terminal" and out2.refused == "Aucun besoin mûri disponible."   # aucune convergence
     assert out2.pursuit_id == out1.pursuit_id and _arc_calls(caps) == 0
     out3 = brain.pursue(realize_intent("pursuit_inconnu"), context=ctx)  # Pursuit sans aucun tour
-    assert out3.state == "terminal" and out3.refused == "aucune proposition mûrie à réaliser"
+    assert out3.state == "terminal" and out3.refused == "Aucun besoin mûri disponible."
+
+
+# --------------------------------------------------------------------- #
+# Garde de convergence A4-1 — realize ne part que depuis la DERNIÈRE convergence encore valide.
+# Le moteur ne lit jamais le contenu des messages : il applique l'invariant sur les faits ``turn`` persistés.
+# --------------------------------------------------------------------- #
+def _drive_converse(brain, ctx, message, pursuit_ref=None):
+    return brain.pursue(converse_intent(message, pursuit_ref=pursuit_ref), context=ctx)
+
+
+def test_convergence_cas1_ready_then_realize_runs_arc(tmp_path):
+    # Cas 1 : ready ↓ realize ⇒ OK (le dernier tour EST la convergence mûrie).
+    conv = _ConvCap([_turn_env("compris", "ready", matured="Une application pour un refuge")])
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    pid = _drive_converse(brain, ctx, "besoin flou").pursuit_id
+    out = brain.pursue(realize_intent(pid), context=ctx)
+    assert out.state == "awaiting" and out.wait_reason == "governance"
+    assert [s["faculty"] for s in out.steps] == ["understanding", "specification", "build"]
+    assert "Une application pour un refuge" in ctx.stores.proposals.read_all()[0]["need"]
+
+
+def test_convergence_cas2_ready_then_continue_refuses_as_evolved(tmp_path):
+    # Cas 2 : ready ↓ continue ↓ realize ⇒ refus (la convergence n'est plus la dernière). Aucun arc.
+    conv = _ConvCap([_turn_env("compris", "ready", matured="X"),
+                     _turn_env("on continue d'explorer", "continue")])
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    pid = _drive_converse(brain, ctx, "t1").pursuit_id
+    _drive_converse(brain, ctx, "t2", pursuit_ref=pid)                    # tour continue POSTÉRIEUR
+    out = brain.pursue(realize_intent(pid), context=ctx)
+    assert out.state == "terminal" and _arc_calls(caps) == 0
+    assert out.refused.startswith("La conversation a évolué depuis la dernière convergence.")
+
+
+def test_convergence_cas3_ready_then_failed_refuses_as_failed(tmp_path):
+    # Cas 3 : ready ↓ failed ↓ realize ⇒ refus (dernier tour illisible), quel que soit le contenu. Aucun arc.
+    conv = _ConvCap([_turn_env("compris", "ready", matured="X"),
+                     _env("pas du JSON")])                                # tour suivant → failed
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    pid = _drive_converse(brain, ctx, "t1").pursuit_id
+    _drive_converse(brain, ctx, "t2", pursuit_ref=pid)                    # tour failed POSTÉRIEUR
+    assert ctx.stores.turns.read_all()[-1]["status"] == "failed"         # le fait failed est bien le dernier
+    out = brain.pursue(realize_intent(pid), context=ctx)
+    assert out.state == "terminal" and _arc_calls(caps) == 0
+    assert out.refused.startswith("Votre dernier message n'a pas pu être traité.")
+
+
+def test_convergence_cas4_revalidation_after_failed_runs_arc(tmp_path):
+    # Cas 4 : ready ↓ failed ↓ converse ↓ ready ↓ realize ⇒ OK (revalidation de convergence).
+    conv = _ConvCap([_turn_env("c1", "ready", matured="Ancien besoin"),
+                     _env("pas du JSON"),                                 # failed intercalé
+                     _turn_env("c2", "ready", matured="Nouveau besoin révisé")])
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    pid = _drive_converse(brain, ctx, "t1").pursuit_id
+    _drive_converse(brain, ctx, "t2", pursuit_ref=pid)                    # failed
+    _drive_converse(brain, ctx, "t3", pursuit_ref=pid)                    # nouvelle convergence
+    out = brain.pursue(realize_intent(pid), context=ctx)
+    assert out.state == "awaiting" and out.wait_reason == "governance" and _arc_calls(caps) == 3
+    assert "Nouveau besoin révisé" in ctx.stores.proposals.read_all()[0]["need"]  # besoin = DERNIÈRE convergence
+
+
+def test_convergence_cas5_realization_facts_never_invalidate_convergence(tmp_path):
+    # Cas 5 : ready ↓ realize ↓ Brief/Spec/Manifest ; la garde ne considère QUE les faits turn — les faits de
+    # réalisation ne suspendent jamais la convergence. Preuve : un second realize repart de la même convergence.
+    conv = _ConvCap([_turn_env("compris", "ready", matured="Une application pour un refuge")])
+    caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path)
+    pid = _drive_converse(brain, ctx, "besoin").pursuit_id
+    out1 = brain.pursue(realize_intent(pid), context=ctx)
+    assert out1.state == "awaiting" and out1.wait_reason == "governance"  # arc produit (Brief/Spec/Manifest)
+    turns_before = ctx.stores.turns.read_all()
+    out2 = brain.pursue(realize_intent(pid), context=ctx)                 # aucun nouveau tour entre-temps
+    assert out2.state == "awaiting" and out2.wait_reason == "governance"  # convergence toujours courante
+    assert ctx.stores.turns.read_all() == turns_before                   # la réalisation n'ajoute AUCUN fait turn
 
 
 def test_converse_budget_refused_before_frontier_leaves_no_fact(tmp_path):

@@ -22,47 +22,176 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
+from scc_brainai_bootstrap.builder.cognitive_identity import COGNITIVE_IDENTITY, compose_prompt
 from scc_brainai_bootstrap.builder.tool_runner import run_confined
+
+# Élément d'un besoin mûri (C9). **Gelé** à ``{statement}`` pour ce chantier : EPISTEMIC-PROVENANCE (C1/C4)
+# ajoutera plus tard des propriétés OPTIONNELLES (provenance, statut épistémique…) — évolution additive, jamais
+# un remplacement. N'ajoute AUCUN champ ici « au cas où ».
+_MATURED_ELEMENT: Dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {"statement": {"type": "string"}},
+    "required": ["statement"],
+}
+
+# ``matured_need`` **structuré** (C9) : sépare le besoin fondamental (invariant si la solution change) des
+# solutions privilégiées, hypothèses actives et inconnues nommées. La présence d'``inconnues_nommees`` NE rend
+# JAMAIS un ``ready`` invalide (C8) : une inconnue peut rester ouverte si sa résolution ne changerait pas le
+# besoin fondamental.
+_MATURED_NEED_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "besoin_fondamental": {"type": "string"},                       # ce que l'utilisateur cherche à résoudre
+        "solutions_privilegiees": {"type": "array", "items": _MATURED_ELEMENT},  # pistes actuelles, révisables
+        "inconnues_nommees": {"type": "array", "items": _MATURED_ELEMENT},       # ouvertes, non bloquantes (C8)
+        "hypotheses_actives": {"type": "array", "items": _MATURED_ELEMENT},      # non confirmées
+    },
+    "required": ["besoin_fondamental", "solutions_privilegiees", "inconnues_nommees", "hypotheses_actives"],
+}
+_MATURED_LIST_KEYS = ("solutions_privilegiees", "inconnues_nommees", "hypotheses_actives")
 
 # Schéma **structuré** de sortie d'un tour de conversation (forcé par ``--json-schema``). ``reply`` = réponse
 # naturelle ; ``readiness`` = appréciation (``continue`` tant que le besoin n'est pas mûr ; ``ready`` quand il
-# l'est) ; ``matured_need`` = besoin reformulé prêt à réaliser (fourni seulement quand ``ready``).
+# l'est) ; ``matured_need`` = besoin mûri **structuré** (fourni seulement quand ``ready``).
 CONVERSATION_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
         "reply": {"type": "string"},                                   # réponse conversationnelle
         "readiness": {"type": "string", "enum": ["continue", "ready"]},  # appréciation cognitive
-        "matured_need": {"type": "string"},                            # besoin mûri (si ready)
+        "matured_need": _MATURED_NEED_SCHEMA,                           # besoin mûri structuré (si ready)
     },
     "required": ["reply", "readiness"],
 }
+
+
+def normalize_matured_need(value: Any) -> Optional[Dict[str, Any]]:
+    """Normalise un ``matured_need`` en la structure C9 — **frontière de rétrocompatibilité** (D3).
+
+    Accepte ``None``, une **chaîne legacy** (faits d'avant C9 : le besoin brut), ou la structure actuelle.
+    Renvoie ``None`` si rien d'exploitable, sinon un dict aux quatre clés (listes d'éléments ``{statement}``).
+    Ne réécrit **jamais** les faits persistés : c'est une conversion **en lecture**."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        besoin = value.strip()
+        if not besoin:
+            return None
+        return {"besoin_fondamental": besoin, "solutions_privilegiees": [],
+                "inconnues_nommees": [], "hypotheses_actives": []}
+    if isinstance(value, dict):
+        besoin_raw = value.get("besoin_fondamental")
+        besoin = besoin_raw.strip() if isinstance(besoin_raw, str) else ""
+        lists: Dict[str, Any] = {}
+        for k in _MATURED_LIST_KEYS:
+            elems = []
+            for e in value.get(k) or []:
+                if isinstance(e, dict) and isinstance(e.get("statement"), str) and e["statement"].strip():
+                    elems.append({"statement": e["statement"].strip()})
+                elif isinstance(e, str) and e.strip():          # tolérance de lecture (legacy/edge)
+                    elems.append({"statement": e.strip()})
+            lists[k] = elems
+        if not besoin and not any(lists.values()):
+            return None
+        return {"besoin_fondamental": besoin, **lists}
+    return None
+
+
+def matured_need_present(matured: Any) -> bool:
+    """Helper **unique** : un ``matured_need`` est-il effectivement présent ET valide (C8) — c.-à-d. porte un
+    ``besoin_fondamental`` non vide ? Jamais fondé sur la simple truthiness d'un dict. Accepte la forme legacy
+    (normalisée à la volée)."""
+    m = normalize_matured_need(matured)
+    return bool(m and m.get("besoin_fondamental"))
+
+
+def matured_need_to_need_text(matured: Any) -> str:
+    """**Pont de compatibilité** (A2) vers les facultés qui consomment encore un ``need: str`` (understanding).
+
+    Rend un texte **explicitement typé** : la fonction de chaque élément reste lisible en toutes lettres — le
+    besoin ne se confond jamais avec les solutions, hypothèses ou inconnues. Ne qualifie **pas** une inconnue de
+    « phase suivante » : le routage futur n'appartient pas à Conversation.
+
+    NB architectural : ce texte n'est **pas** l'interface cognitive définitive. Quand EXPLORATION existera, elle
+    consommera le ``matured_need`` **structuré depuis le fait persisté** — l'objet est la vérité, ce texte n'est
+    qu'un adaptateur temporaire pour la chaîne actuelle."""
+    m = normalize_matured_need(matured) or {"besoin_fondamental": "", "solutions_privilegiees": [],
+                                             "inconnues_nommees": [], "hypotheses_actives": []}
+    lines = ["BESOIN FONDAMENTAL — ce que l'utilisateur cherche réellement à obtenir ou résoudre :",
+             m.get("besoin_fondamental") or "(non précisé)"]
+    sections = [
+        ("solutions_privilegiees", "SOLUTIONS PRIVILÉGIÉES À CE STADE (pistes actuelles, révisables ; ne constituent pas le besoin) :"),
+        ("hypotheses_actives", "HYPOTHÈSES ACTIVES (non confirmées) :"),
+        ("inconnues_nommees", "INCONNUES NOMMÉES (ouvertes, non bloquantes pour la définition du besoin) :"),
+    ]
+    for key, header in sections:
+        elems = m.get(key) or []
+        if elems:
+            lines.append("")
+            lines.append(header)
+            lines.extend(f"- {e['statement']}" for e in elems)
+    return "\n".join(lines)
 
 # Champs requis d'un tour valide + valeurs d'appréciation admises (garde-fou du contrat).
 _TURN_REQUIRED = tuple(CONVERSATION_SCHEMA["required"])
 _READINESS_VALUES = tuple(CONVERSATION_SCHEMA["properties"]["readiness"]["enum"])
 
 
+# Mission du tour de dialogue — la **tâche**, préfixée par l'**identité** (nature) via ``compose_prompt``.
+# Les consignes actuelles sont conservées intégralement ; les QUATRE dernières phrases sont des traductions
+# locales des mécanismes M3/M4/M6/M8 (archéologie) — aucune règle nouvelle, aucune méthode récitée. La voix
+# (habiter une nature, prendre position, chasser les angles morts) vit dans ``COGNITIVE_IDENTITY`` ; ici, la
+# mission ne fait que dire ce que ce tour attend et rappeler comment répondre.
+_CONVERSATION_MISSION = (
+    "MISSION DU TOUR — dialogue de compréhension. Ce tour est du dialogue, pas une réalisation : "
+    "NE CONSTRUIS RIEN (aucun brief, aucune spécification, aucun manifeste). Dialogue naturellement, à partir "
+    "de l'historique relu ci-dessous et du message de l'utilisateur. Apprécie la maturité du besoin : "
+    "``readiness='continue'`` tant qu'il n'est pas réellement mûr ; ``readiness='ready'`` seulement lorsqu'il "
+    "l'est vraiment — et fournis alors ``matured_need`` (le besoin reformulé, prêt à réaliser). La ``readiness`` "
+    "est une APPRÉCIATION : elle ne lance jamais la réalisation ; seule une confirmation humaine l'autorisera.\n\n"
+    "À chaque tour, ta réponse fait progresser la réflexion : une reformulation, une hypothèse, un angle mort, "
+    "une contradiction relevée, une piste, un arbitrage provisoire — ou une question de clarification courte et "
+    "parfaitement justifiée quand c'est la meilleure contribution. Ce qui est exclu, c'est l'interrogatoire : une "
+    "suite de questions sans pensée offerte en retour.\n\n"
+    "Avant de répondre, envisage plusieurs lectures possibles de la situation et choisis la contribution qui "
+    "réduit le plus l'incertitude ; sur les choix structurants, montre les lectures envisagées et motive ton "
+    "choix.\n\n"
+    "Quand plusieurs pistes deviennent suffisamment étayées, ne reste pas neutre : indique celle que tu "
+    "privilégies et pourquoi ; si elles se valent réellement, dis-le.\n\n"
+    "Si deux tours consécutifs n'ont apporté ni matière nouvelle ni correction, ne pose pas une question de "
+    "plus : propose — une restitution à confirmer, un arbitrage, ou le constat honnête que la conversation "
+    "piétine et ce qu'il faudrait pour la débloquer.\n\n"
+    # C8 — calibration de convergence (D5) : distinguer l'inconnue bloquante de l'inconnue non bloquante.
+    "Distingue une inconnue bloquante — sa résolution pourrait changer le besoin fondamental lui-même — d'une "
+    "inconnue non bloquante — le besoin fondamental est déjà suffisamment défini et l'inconnue peut rester "
+    "ouverte. Ne diffère pas la maturité pour des inconnues non bloquantes : lorsque les conditions de maturité "
+    "sont réunies et que seules subsistent des inconnues dont la résolution ne changerait pas le besoin "
+    "fondamental, déclare le besoin mûr tout en conservant explicitement ces inconnues ouvertes.\n\n"
+    # C9 — remplissage du besoin mûri structuré quand ready.
+    "Quand tu déclares le besoin mûr (readiness='ready'), structure ``matured_need`` en distinguant : le besoin "
+    "fondamental (ce que l'interlocuteur cherche réellement à obtenir ou résoudre — il reste invariant si la "
+    "solution privilégiée change) ; les solutions privilégiées à ce stade (pistes actuelles, révisables, qui ne "
+    "sont pas le besoin) ; les hypothèses actives (non confirmées) ; les inconnues nommées (ouvertes, non "
+    "bloquantes pour la définition du besoin).\n\n"
+    "Réponds UNIQUEMENT via le schéma imposé."
+)
+
+
 def build_prompt(message: str, history: List[Dict[str, Any]]) -> str:
-    """Prompt déterministe d'un tour de dialogue. ``history`` : tours antérieurs (``{role, content}``) relus par
-    le moteur depuis le ``pursuit_id`` — jamais depuis l'UI. BrainAI **dialogue** et **apprécie** la maturité ;
-    il ne construit rien et n'autorise rien."""
+    """Prompt déterministe d'un tour de dialogue = **identité** (nature, ``COGNITIVE_IDENTITY``) puis **mission**
+    (tâche du tour) via :func:`compose_prompt`, suivies de l'historique et du message. ``history`` : tours
+    antérieurs (``{role, content}``) relus par le moteur depuis le ``pursuit_id`` — jamais depuis l'UI. BrainAI
+    **dialogue** et **apprécie** la maturité ; il ne construit rien et n'autorise rien. La Constitution, elle,
+    n'est jamais envoyée au modèle : seuls l'identité et la mission l'atteignent."""
     lines: List[str] = []
     for turn in history or []:
         role = "Utilisateur" if turn.get("role") == "user" else "BrainAI"
         lines.append(f"{role}: {turn.get('content', '')}")
     convo = "\n".join(lines)
-    return (
-        "Tu es BrainAI, un partenaire de réflexion (architecte, ingénieur, associé). Dialogue NATURELLEMENT : "
-        "réponds, pose des questions, challenge, aide à réfléchir, propose des pistes, demande des précisions. "
-        "NE CONSTRUIS RIEN (aucun brief, aucune spécification, aucun manifeste). Apprécie la maturité du besoin : "
-        "``readiness='continue'`` tant qu'il n'est pas assez clair ; ``readiness='ready'`` lorsqu'il l'est — et "
-        "fournis alors ``matured_need`` (le besoin reformulé, prêt à réaliser). La ``readiness`` est une "
-        "APPRÉCIATION : elle ne lance jamais la réalisation ; seule une confirmation humaine l'autorisera. "
-        "Réponds UNIQUEMENT via le schéma imposé.\n\n"
-        + (f"HISTORIQUE :\n{convo}\n\n" if convo else "")
-        + f"MESSAGE : {message}"
-    )
+    body = (f"HISTORIQUE :\n{convo}\n\n" if convo else "") + f"MESSAGE : {message}"
+    return compose_prompt(COGNITIVE_IDENTITY, f"{_CONVERSATION_MISSION}\n\n{body}")
 
 
 def build_turn(*, message: str, prompt: str, capability: str, adapter: str, model: Optional[str],
@@ -131,8 +260,21 @@ def build_turn(*, message: str, prompt: str, capability: str, adapter: str, mode
     if not valid:
         return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
                 "error": "format tour invalide", "diagnostic": diag}
-    matured = turn.get("matured_need")
-    matured = matured if isinstance(matured, str) and matured.strip() else None
+    matured = normalize_matured_need(turn.get("matured_need"))   # structure C9 (ou None), lecture legacy tolérée
+    has_matured = matured is not None                            # le modèle a fourni un contenu de besoin mûri
+    # Garde de cohérence A4-2 : un ``matured_need`` n'a de sens qu'avec une appréciation ``ready``. Un besoin
+    # « mûri » porté par un tour ``continue`` est une incohérence cognitive (maturité affirmée sans l'avoir
+    # jugée) ⇒ tour **non conforme**, ``failed``. Ainsi un ``matured_need`` ne vit jamais que sur un ``ready`` —
+    # ce que la garde de convergence de ``realize`` (A4-1) suppose côté relecture.
+    if has_matured and turn["readiness"] != "ready":
+        return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
+                "error": "matured_need sans appréciation ready", "diagnostic": diag}
+    # Garde de cohérence C8/C9 : un besoin **mûr** doit être **définissable**. Un ``ready`` sans ``besoin
+    # fondamental`` non vide est incohérent ⇒ ``failed``. La présence d'``inconnues_nommees`` NE bloque PAS un
+    # ``ready`` (C8) : seules comptent la présence et la non-vacuité du besoin fondamental (helper unique).
+    if turn["readiness"] == "ready" and not matured_need_present(turn.get("matured_need")):
+        return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
+                "error": "ready sans besoin fondamental", "diagnostic": diag}
     return {**base, "status": "proposed", "reply": turn["reply"], "readiness": turn["readiness"],
             "matured_need": matured, "error": None, "diagnostic": None}
 
@@ -207,4 +349,5 @@ class ClaudeCodeConversationAdapter:
 
 
 __all__ = ["CONVERSATION_SCHEMA", "build_prompt", "build_turn", "ConversationCapability",
-           "ClaudeCodeConversationAdapter"]
+           "ClaudeCodeConversationAdapter", "normalize_matured_need", "matured_need_present",
+           "matured_need_to_need_text"]
