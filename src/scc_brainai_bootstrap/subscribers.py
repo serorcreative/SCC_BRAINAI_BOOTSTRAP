@@ -24,6 +24,7 @@ class EventRecorder:
 
     def __init__(self) -> None:
         self._events: List[Dict[str, Any]] = []
+        self._dumped = 0    # curseur de persistance : nb d'événements DÉJÀ écrits sur disque
 
     def on_event(self, event: Dict[str, Any]) -> None:
         self._events.append(event)
@@ -36,10 +37,20 @@ class EventRecorder:
         return len(self._events)
 
     def dump(self, path: Path) -> Path:
+        """Persiste le journal en JSONL **append-only** (jamais de troncature).
+
+        N'écrit que les événements **nouveaux** depuis le dernier ``dump`` (curseur ``_dumped``) : un second
+        ``dump`` **n'efface pas** le premier, et n'introduit aucune duplication intra-processus. Un processus
+        neuf (recorder neuf, curseur à 0) **ajoute** ses événements à la suite du journal existant — l'ancien
+        comportement ``write_text`` tronquait le journal à chaque processus (bug de traçabilité, REVUE 6 août)."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        content = "\n".join(json.dumps(e, ensure_ascii=False) for e in self._events)
-        path.write_text(content + ("\n" if content else ""), encoding="utf-8")
+        new = self._events[self._dumped:]
+        if new:
+            with path.open("a", encoding="utf-8") as fh:
+                for e in new:
+                    fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+            self._dumped = len(self._events)
         return path
 
 

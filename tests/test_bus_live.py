@@ -65,6 +65,30 @@ def test_event_recorder_and_watcher_units():
     assert watch.ready_seen is True
 
 
+def test_event_recorder_dump_is_append_only(tmp_path):
+    # JALON-0 T2 — le journal d'événements est append-only : un second dump N'EFFACE PAS le premier
+    # (bug REVUE 6 août : write_text tronquait à chaque processus). Curseur → delta seulement, sans duplication.
+    path = tmp_path / "events.jsonl"
+    rec1 = EventRecorder()                                   # « processus 1 »
+    rec1.on_event({"seq": 1, "topic": "a"})
+    rec1.on_event({"seq": 2, "topic": "b"})
+    rec1.dump(path)
+    assert [json.loads(l)["topic"] for l in path.read_text(encoding="utf-8").splitlines()] == ["a", "b"]
+
+    rec2 = EventRecorder()                                   # « processus 2 » : recorder neuf, curseur à 0
+    rec2.on_event({"seq": 3, "topic": "c"})
+    rec2.dump(path)                                          # MÊME fichier
+    assert [json.loads(l)["topic"] for l in path.read_text(encoding="utf-8").splitlines()] == ["a", "b", "c"]
+
+    before = path.read_text(encoding="utf-8")                # idempotence intra-processus
+    rec2.dump(path)
+    assert path.read_text(encoding="utf-8") == before
+
+    rec2.on_event({"seq": 4, "topic": "d"})                  # delta uniquement, aucune duplication
+    rec2.dump(path)
+    assert [json.loads(l)["topic"] for l in path.read_text(encoding="utf-8").splitlines()] == ["a", "b", "c", "d"]
+
+
 def test_cli_events(tmp_path, capsys):
     from scc_brainai_bootstrap.core.config import DEFAULT_SCC_ROOT
     cfg = tmp_path / "brainai.json"
