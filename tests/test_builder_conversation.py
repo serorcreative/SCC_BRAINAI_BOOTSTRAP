@@ -45,9 +45,15 @@ def test_schema_shape_reply_and_readiness_appraisal():
     assert set(mn["required"]) == {"besoin_fondamental", "solutions_privilegiees",
                                    "inconnues_nommees", "hypotheses_actives"}
     assert mn["properties"]["besoin_fondamental"]["type"] == "string"
-    elem = mn["properties"]["solutions_privilegiees"]["items"]              # ELEMENT gelé à {statement}
+    elem = mn["properties"]["solutions_privilegiees"]["items"]              # ELEMENT = statement + source (additif J1)
     assert elem["type"] == "object" and elem["additionalProperties"] is False
-    assert set(elem["required"]) == {"statement"} and set(elem["properties"]) == {"statement"}
+    assert set(elem["required"]) == {"statement"}                          # source OPTIONNELLE
+    assert set(elem["properties"]) == {"statement", "source"}
+    # EPISTEMIC-PROVENANCE (J1) : « vérifié » est STRUCTURELLEMENT inémettable par le modèle.
+    assert set(elem["properties"]["source"]["enum"]) == {"fourni_par_utilisateur", "connaissance_modele",
+                                                         "deduit", "suppose", "inconnu"}
+    assert "verifie" not in elem["properties"]["source"]["enum"]
+    assert "vérifié" not in elem["properties"]["source"]["enum"]
 
 
 def test_build_prompt_is_deterministic_and_carries_message_and_history():

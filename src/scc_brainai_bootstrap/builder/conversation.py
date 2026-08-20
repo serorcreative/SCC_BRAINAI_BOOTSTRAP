@@ -25,13 +25,28 @@ from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extrac
 from scc_brainai_bootstrap.builder.cognitive_identity import COGNITIVE_IDENTITY, compose_prompt
 from scc_brainai_bootstrap.builder.tool_runner import run_confined
 
-# Élément d'un besoin mûri (C9). **Gelé** à ``{statement}`` pour ce chantier : EPISTEMIC-PROVENANCE (C1/C4)
-# ajoutera plus tard des propriétés OPTIONNELLES (provenance, statut épistémique…) — évolution additive, jamais
-# un remplacement. N'ajoute AUCUN champ ici « au cas où ».
+# Provenance épistémique d'un élément (EPISTEMIC-PROVENANCE, J1) — valeurs **émises par le modèle**. « vérifié »
+# est **absent** de cette liste : il est **structurellement inémettable** par le modèle et réservé à une
+# attribution SYSTÈME reposant sur une vérification réelle (J2+). Une hypothèse ne devient jamais un fait par
+# simple survie de tours : la provenance est ré-émise à chaque tour, elle ne se durcit pas d'elle-même.
+_ELEMENT_SOURCES_EMITTABLE = ("fourni_par_utilisateur", "connaissance_modele", "deduit", "suppose", "inconnu")
+
+# Étiquettes lisibles (rendu A2), sans jamais parler de « vérifié » côté modèle.
+_SOURCE_LABELS = {
+    "fourni_par_utilisateur": "fourni par l'utilisateur", "connaissance_modele": "connaissance modèle",
+    "deduit": "déduit", "suppose": "supposé", "inconnu": "inconnu",
+}
+
+# Élément d'un besoin mûri (C9) — extension **additive** (EPISTEMIC-PROVENANCE J1) : ``statement`` (gelé) +
+# ``source`` OPTIONNELLE (provenance émise par le modèle). Jamais de remplacement destructif ; aucun champ « au
+# cas où » au-delà de la provenance réellement exigée par J1.
 _MATURED_ELEMENT: Dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "properties": {"statement": {"type": "string"}},
+    "properties": {
+        "statement": {"type": "string"},
+        "source": {"type": "string", "enum": list(_ELEMENT_SOURCES_EMITTABLE)},   # « vérifié » exclu du schéma
+    },
     "required": ["statement"],
 }
 
@@ -89,7 +104,11 @@ def normalize_matured_need(value: Any) -> Optional[Dict[str, Any]]:
             elems = []
             for e in value.get(k) or []:
                 if isinstance(e, dict) and isinstance(e.get("statement"), str) and e["statement"].strip():
-                    elems.append({"statement": e["statement"].strip()})
+                    el: Dict[str, Any] = {"statement": e["statement"].strip()}
+                    src = e.get("source")                       # provenance émise conservée SI valide (5 valeurs) ;
+                    if src in _ELEMENT_SOURCES_EMITTABLE:        # « vérifié »/invalide/absent → non persisté ⇒ inconnu en lecture
+                        el["source"] = src
+                    elems.append(el)
                 elif isinstance(e, str) and e.strip():          # tolérance de lecture (legacy/edge)
                     elems.append({"statement": e.strip()})
             lists[k] = elems
@@ -97,6 +116,17 @@ def normalize_matured_need(value: Any) -> Optional[Dict[str, Any]]:
             return None
         return {"besoin_fondamental": besoin, **lists}
     return None
+
+
+def element_source(element: Any) -> str:
+    """Provenance épistémique d'un élément, **en lecture**. Absence de ``source`` (faits historiques d'avant J1,
+    ou champ non émis) ⇒ ``inconnu`` — jamais fabriquée, jamais « vérifié ». Toute valeur hors des 5 valeurs
+    émettables est traitée comme ``inconnu`` (aucune garde ne peut promouvoir en « vérifié »)."""
+    if isinstance(element, dict):
+        src = element.get("source")
+        if src in _ELEMENT_SOURCES_EMITTABLE:
+            return src
+    return "inconnu"
 
 
 def matured_need_present(matured: Any) -> bool:
@@ -131,7 +161,8 @@ def matured_need_to_need_text(matured: Any) -> str:
         if elems:
             lines.append("")
             lines.append(header)
-            lines.extend(f"- {e['statement']}" for e in elems)
+            # Chaque élément porte sa provenance en toutes lettres (EPISTEMIC-PROVENANCE) — jamais « vérifié ».
+            lines.extend(f"- {e['statement']}  [{_SOURCE_LABELS[element_source(e)]}]" for e in elems)
     return "\n".join(lines)
 
 # Champs requis d'un tour valide + valeurs d'appréciation admises (garde-fou du contrat).
@@ -175,6 +206,13 @@ _CONVERSATION_MISSION = (
     "solution privilégiée change) ; les solutions privilégiées à ce stade (pistes actuelles, révisables, qui ne "
     "sont pas le besoin) ; les hypothèses actives (non confirmées) ; les inconnues nommées (ouvertes, non "
     "bloquantes pour la définition du besoin).\n\n"
+    # EPISTEMIC-PROVENANCE (J1) — chaque élément porte sa provenance émise.
+    "Pour CHAQUE solution, hypothèse ou inconnue, renseigne son champ ``source`` — sa provenance — parmi : "
+    "``fourni_par_utilisateur`` (l'interlocuteur l'a dit) · ``connaissance_modele`` (savoir général, non propre "
+    "à ce dialogue) · ``deduit`` (conclusion logique tirée de l'échange) · ``suppose`` (hypothèse non confirmée) "
+    "· ``inconnu`` (provenance incertaine). N'emploie JAMAIS « vérifié » : ce statut est réservé à une "
+    "vérification réelle du système, pas à ton appréciation. Une hypothèse ne devient pas un fait parce qu'elle "
+    "a traversé plusieurs tours : garde sa provenance réelle.\n\n"
     "Réponds UNIQUEMENT via le schéma imposé."
 )
 
@@ -350,4 +388,4 @@ class ClaudeCodeConversationAdapter:
 
 __all__ = ["CONVERSATION_SCHEMA", "build_prompt", "build_turn", "ConversationCapability",
            "ClaudeCodeConversationAdapter", "normalize_matured_need", "matured_need_present",
-           "matured_need_to_need_text"]
+           "matured_need_to_need_text", "element_source"]

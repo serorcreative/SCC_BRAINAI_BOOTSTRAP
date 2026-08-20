@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from scc_brainai_bootstrap.builder.brainai import (
     BrainAI, Capabilities, RunContext, Stores, converse_intent, need_intent, realize_intent)
 from scc_brainai_bootstrap.builder.builds import BuildStore
+from scc_brainai_bootstrap.builder.confirmations import ConfirmationStore
 from scc_brainai_bootstrap.builder.proposals import ProposalStore
 from scc_brainai_bootstrap.builder.specifications import SpecificationStore
 from scc_brainai_bootstrap.builder.turns import TurnStore
@@ -107,19 +108,11 @@ def demo_capabilities() -> Capabilities:
 
 
 def real_capabilities() -> Capabilities:
-    """Capacités **réelles** (facturables) — activées explicitement (mode réel)."""
-    from scc_brainai_bootstrap.builder.build import ClaudeCodeBuildAdapter
-    from scc_brainai_bootstrap.builder.conversation import ClaudeCodeConversationAdapter
-    from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationAdapter
-    from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
-    return Capabilities(
-        understanding=ClaudeCodeUnderstandingAdapter(model="haiku", max_budget_usd=0.50, timeout=180),
-        specification=ClaudeCodeSpecificationAdapter(model="haiku", max_budget_usd=0.50, timeout=180),
-        build=ClaudeCodeBuildAdapter(model="haiku", max_budget_usd=0.50, timeout=180),
-        # Conversation réelle en **sonnet** (A6) : la voix dialogique justifie la capacité supérieure ;
-        # timeout 180 (R6 interdit le retry — un timeout serré fabriquerait des échecs évitables). Plafond
-        # coût par appel inchangé (0,50 $). Understanding/Specification/Build restent en haiku.
-        conversation=ClaudeCodeConversationAdapter(model="sonnet", max_budget_usd=0.50, timeout=180))
+    """Capacités **réelles** (facturables) — **résolues via le Capability Registry**. Aucun nom de fournisseur,
+    aucun import d'adaptateur concret ici : la sélection ``capacité → fournisseur → adaptateur`` vit dans la
+    couche d'infrastructure :mod:`brainai_app.providers` (découplage structurel du fournisseur, I9)."""
+    from brainai_app import providers
+    return providers.real_capabilities()
 
 
 def _capabilities(mode: str) -> Capabilities:
@@ -300,7 +293,8 @@ def _session_context(root: Path, *, budget_usd: float) -> RunContext:
     stores = Stores(proposals=ProposalStore(root / "prop.jsonl"),
                     specifications=SpecificationStore(root / "spec.jsonl"),
                     builds=BuildStore(root / "build.jsonl"),
-                    turns=TurnStore(root / "turns.jsonl"))
+                    turns=TurnStore(root / "turns.jsonl"),
+                    confirmations=ConfirmationStore(root / "confirmations.jsonl"))
     return RunContext(budget_usd=budget_usd, project_id="session",
                       workspace=Workspace(root / "exec", "session"), stores=stores)
 
@@ -321,15 +315,17 @@ def converse(message: str, *, pursuit_ref: Optional[str] = None, mode: str = "de
     return to_viewmodel(outcome, need=message, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
 
 
-def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0) -> Dict[str, Any]:
+def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
+            actor: Any = None) -> Dict[str, Any]:
     """**Confirmation humaine** : poursuit la **même** Pursuit vers l'arc. Le besoin (``matured_need``) est relu
-    **côté moteur** depuis les tours ; l'UI n'en fournit aucun."""
+    **côté moteur** depuis les tours ; l'UI n'en fournit aucun. ``actor`` = identité **déclarée** (non vérifiée)
+    à l'origine de la confirmation ; enregistrée comme fait ``convergence_confirmed`` séparé (D3)."""
     caps = _capabilities(mode)
     root = _session_dir(pursuit_ref)
     ctx = _session_context(root, budget_usd=budget_usd)
     brain = BrainAI(caps)
     t0 = time.monotonic()
-    outcome = brain.pursue(realize_intent(pursuit_ref), context=ctx)
+    outcome = brain.pursue(realize_intent(pursuit_ref, actor=actor), context=ctx)
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     root = _settle_dir(root, outcome.pursuit_id)                 # no-op hors transit (realize a toujours un pursuit_ref)
     _remember(outcome.pursuit_id, root)

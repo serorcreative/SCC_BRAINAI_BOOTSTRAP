@@ -17,8 +17,10 @@ import json
 
 from scc_brainai_bootstrap.builder import conversation as C
 from scc_brainai_bootstrap.builder.cognitive_identity import COGNITIVE_IDENTITY, CONDENSED_IDENTITY
+from scc_brainai_bootstrap.builder.confirmations import ConfirmationStore, build_confirmation, declared_actor
 from scc_brainai_bootstrap.builder.conversation import (
     build_turn,
+    element_source,
     matured_need_present,
     matured_need_to_need_text,
     normalize_matured_need,
@@ -205,3 +207,183 @@ def test_bench_c5_legacy_index_only_for_legacy_dirs(tmp_path):
     with X._SESSIONS_LOCK:
         X._SESSIONS.clear()
     assert X._session_dir("pursuit_legacy_ext") == legacy_dir              # retrouvé via l'index de compat
+
+
+# ===================================================================== #
+# EPISTEMIC-PROVENANCE (J1) — provenance émise, « vérifié » inémettable, legacy = inconnu
+# ===================================================================== #
+def _mel(besoin, sols=(), inconnues=(), hyps=()):
+    # matured avec des ÉLÉMENTS dicts (pas des chaînes) — pour porter une provenance ``source``.
+    return {"besoin_fondamental": besoin, "solutions_privilegiees": list(sols),
+            "inconnues_nommees": list(inconnues), "hypotheses_actives": list(hyps)}
+
+
+def test_bench_element_source_emitted_persisted_and_read():
+    m = _mel("besoin défini",
+             sols=[{"statement": "piste A", "source": "deduit"}],
+             hyps=[{"statement": "public non expert", "source": "suppose"}])
+    f = _turn({"reply": "r", "readiness": "ready", "matured_need": m})
+    assert f["status"] == "proposed"
+    # provenance émise CONSERVÉE (persistée) et RELUE
+    assert f["matured_need"]["solutions_privilegiees"][0]["source"] == "deduit"
+    assert element_source(f["matured_need"]["solutions_privilegiees"][0]) == "deduit"
+    assert element_source(f["matured_need"]["hypotheses_actives"][0]) == "suppose"
+
+
+def test_bench_verifie_is_structurally_unemittable_by_model():
+    # « vérifié » exclu de l'enum émettable ET dropé par normalize (aucune garde ne peut le promouvoir).
+    props = C.CONVERSATION_SCHEMA["properties"]["matured_need"]["properties"]
+    enum = props["solutions_privilegiees"]["items"]["properties"]["source"]["enum"]
+    assert "verifie" not in enum and "vérifié" not in enum
+    m = _mel("b", sols=[{"statement": "x", "source": "verifie"}])   # tentative de « vérifié »
+    el = normalize_matured_need(m)["solutions_privilegiees"][0]
+    assert "source" not in el                       # dropé
+    assert element_source(el) == "inconnu"          # lu comme inconnu, jamais « vérifié »
+
+
+def _matured_with(besoin, sols=()):
+    return {"besoin_fondamental": besoin,
+            "solutions_privilegiees": list(sols),
+            "inconnues_nommees": [], "hypotheses_actives": []}
+
+
+def test_bench_legacy_and_absent_source_default_inconnu_no_fabrication():
+    # Fait historique : élément SANS source → inconnu ; jamais fabriqué.
+    m = _matured_with("besoin legacy", sols=[{"statement": "piste sans source"}])
+    el = normalize_matured_need(m)["solutions_privilegiees"][0]
+    assert "source" not in el and element_source(el) == "inconnu"
+    # chaîne legacy → structure sans source → besoin lu, provenance inconnue par défaut
+    assert element_source({}) == "inconnu" and element_source("pas un dict") == "inconnu"
+
+
+def test_bench_source_labels_rendered_never_verifie():
+    m = _mel("b", sols=[{"statement": "s", "source": "fourni_par_utilisateur"}])
+    txt = matured_need_to_need_text(m)
+    assert "fourni par l'utilisateur" in txt and "vérifié" not in txt
+
+
+# ===================================================================== #
+# D3 — confirmation humaine : fait séparé append-only, acteur déclaré/non vérifié, ne déclenche rien
+# ===================================================================== #
+def test_bench_declared_actor_never_verified():
+    assert declared_actor("alice") == {"id": "alice", "attribution": "declared", "verified": False}
+    assert declared_actor(None)["id"] == "humain"
+    # même si l'entrée prétend « verified », on ne fabrique JAMAIS de garantie d'identité (RS-029)
+    forced = declared_actor({"id": "bob", "verified": True, "attribution": "authenticated"})
+    assert forced == {"id": "bob", "attribution": "declared", "verified": False}
+
+
+def test_bench_convergence_confirmed_is_append_only_and_inert(tmp_path):
+    store = ConfirmationStore(tmp_path / "confirmations.jsonl")
+    f1 = store.record(build_confirmation(pursuit_ref="pursuit_x", turn_ref="turn_ready_1",
+                                         as_of="2026-08-20T00:00:00+00:00", actor="frederique"))
+    assert f1["fact_type"] == "convergence_confirmed" and f1["turn_ref"] == "turn_ready_1"
+    assert f1["actor"] == {"id": "frederique", "attribution": "declared", "verified": False}
+    assert f1["confirmation_id"].startswith("conf_")
+    # append-only : un second enregistrement n'efface pas le premier
+    store.record(build_confirmation(pursuit_ref="pursuit_x", turn_ref="turn_ready_2",
+                                    as_of="2026-08-20T00:01:00+00:00", actor="rose"))
+    refs = [c["turn_ref"] for c in store.read_all()]
+    assert refs == ["turn_ready_1", "turn_ready_2"]
+    # inerte : enregistrer une confirmation ne crée AUCUN autre artefact (record != decision)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["confirmations.jsonl"]
+
+
+def test_bench_realize_records_confirmation_without_mutating_history(tmp_path):
+    # ready → realize : le tour ready n'est PAS muté ; un fait de confirmation séparé apparaît.
+    from scc_brainai_bootstrap.builder.brainai import (
+        BrainAI, Capabilities, RunContext, Stores, converse_intent, realize_intent)
+    from scc_brainai_bootstrap.builder.proposals import ProposalStore
+    from scc_brainai_bootstrap.builder.specifications import SpecificationStore
+    from scc_brainai_bootstrap.builder.builds import BuildStore
+    from scc_brainai_bootstrap.builder.workspace import Workspace
+    import json as _json
+
+    def _env2(obj):
+        return {"type": "result", "subtype": "success", "is_error": False, "api_error_status": None,
+                "num_turns": 1, "result": _json.dumps(obj, ensure_ascii=False), "total_cost_usd": 0.0,
+                "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    class _Conv:
+        capability = "conversation"; name = "fake"; model = "fake"
+        def propose(self, message, *, history, cwd, budget_remaining_usd):
+            obj = {"reply": "ok", "readiness": "ready",
+                   "matured_need": _mel("un besoin défini", sols=[{"statement": "piste", "source": "deduit"}])}
+            return {"called": True, "envelope": _env2(obj), "exit_code": 0, "timed_out": False,
+                    "prompt": "p", "argv": ["x"], "stdout": "", "stderr": ""}
+
+    class _Arc:
+        def __init__(self, cap): self.capability = cap; self.name = "fake"; self.model = "fake"
+        def propose(self, payload, *, cwd, budget_remaining_usd):
+            body = {"understanding": {"objective":"o","context":"c","actors":[],"scope":[],"assumptions":[],
+                                      "open_questions":[],"constraints":[]},
+                    "specification": {k: ([] if k!="product_objective" else "o") for k in
+                        ("product_objective","users_and_roles","functional_scope","features","entities_and_data",
+                         "key_journeys","constraints","acceptance_criteria","assumptions","open_questions","out_of_scope")},
+                    "build": {"name":"n","summary":"s","users":[],"features":[],"entities":[]}}[self.capability]
+            return {"called": True, "envelope": _env2(body), "exit_code": 0, "timed_out": False,
+                    "prompt": "p", "argv": ["x"], "stdout": "", "stderr": ""}
+
+    caps = Capabilities(understanding=_Arc("understanding"), specification=_Arc("specification"),
+                        build=_Arc("build"), conversation=_Conv())
+    stores = Stores(proposals=ProposalStore(tmp_path/"p.jsonl"), specifications=SpecificationStore(tmp_path/"s.jsonl"),
+                    builds=BuildStore(tmp_path/"b.jsonl"), turns=TurnStore(tmp_path/"t.jsonl"),
+                    confirmations=ConfirmationStore(tmp_path/"c.jsonl"))
+    ctx = RunContext(budget_usd=5.0, project_id="p", workspace=Workspace(tmp_path/"exec","p"), stores=stores)
+    brain = BrainAI(caps)
+    pid = brain.pursue(converse_intent("besoin"), context=ctx).pursuit_id
+    ready_fact = stores.turns.read_all()[-1]
+    before = hashlib.sha256((tmp_path/"t.jsonl").read_bytes()).hexdigest()
+    brain.pursue(realize_intent(pid, actor="frederique"), context=ctx)          # confirmation humaine
+    after = hashlib.sha256((tmp_path/"t.jsonl").read_bytes()).hexdigest()
+    assert after == before                                                       # tours NON mutés (I5)
+    confs = stores.confirmations.read_all()
+    assert len(confs) == 1 and confs[0]["turn_ref"] == ready_fact["turn_id"]      # référence le tour ready
+    assert confs[0]["actor"]["verified"] is False                                # déclaré / non vérifié
+
+
+# ===================================================================== #
+# Capability Registry — resolve utilisé, aucun câblage fournisseur, substituabilité
+# ===================================================================== #
+def test_bench_no_provider_wiring_in_composition_or_business_logic():
+    import inspect
+    from brainai_app import composition
+    from scc_brainai_bootstrap.builder import brainai as engine
+    for mod in (composition, engine):
+        src = inspect.getsource(mod)
+        assert "ClaudeCode" not in src, f"import/nom de fournisseur concret dans {mod.__name__}"
+        assert "claude_code" not in src, f"slug fournisseur dans {mod.__name__}"
+
+
+def test_bench_resolve_capability_used_on_product_path():
+    from brainai_app import providers
+    caps = providers.real_capabilities()          # chemin produit réel = résolution de capacités
+    assert caps.understanding.capability == "understanding"
+    assert caps.conversation.capability == "conversation" and caps.conversation.model == "sonnet"
+
+
+def test_bench_provider_substitutable_by_descriptor_change():
+    from brainai_app import providers
+    from scc_brainai_bootstrap.registry.descriptor import AgentDescriptor, AgentState
+
+    class _FakeBuild:
+        capability = "build"; name = "test_double"; model = "test_double"
+        def propose(self, spec, *, cwd, budget_remaining_usd):
+            return {"called": True, "envelope": None, "exit_code": 0, "timed_out": False,
+                    "prompt": "", "argv": [], "stdout": "", "stderr": ""}
+
+    # Descriptor BUILD_SOFTWARE re-pointé vers un fournisseur « test_double » + binder dédié — SANS toucher
+    # composition.py ni builder/*.
+    descriptors = [AgentDescriptor(id="brainai.test_double.build_software", namespace="brainai",
+                                   capabilities=[providers.BUILD_SOFTWARE], state=AgentState.ACTIVE,
+                                   provider="test_double", availability="available")]
+    binders = {("test_double", providers.BUILD_SOFTWARE): lambda: _FakeBuild()}
+    impl = providers.resolve_capability(providers.BUILD_SOFTWARE, descriptors, binders)
+    assert isinstance(impl, _FakeBuild)           # implémentation substituée par le seul changement de descriptor
+
+
+def test_bench_cost_field_is_present_as_j2_anchor_not_executed():
+    from brainai_app import providers
+    for d in providers.default_descriptors():
+        assert hasattr(d, "cost")                 # ancrage budget J2 présent
+        assert d.cost is None                     # AUCUN budget exécuté en J1

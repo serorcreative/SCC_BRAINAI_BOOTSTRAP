@@ -47,6 +47,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from scc_brainai_bootstrap.builder.build import BuildCapability, produce_build
+from scc_brainai_bootstrap.builder.confirmations import build_confirmation
 from scc_brainai_bootstrap.builder.conversation import (
     ConversationCapability,
     build_turn,
@@ -118,13 +119,16 @@ def converse_intent(message: str, *, pursuit_ref: Optional[str] = None) -> Inten
     return Intent(kind="converse", pursuit_ref=ref, payload={"message": message.strip()})
 
 
-def realize_intent(pursuit_id: str) -> Intent:
+def realize_intent(pursuit_id: str, *, actor: Any = None) -> Intent:
     """Intention de **réalisation** d'une Pursuit mûrie : lance l'arc (Brief→Spéc→Manifeste) sur la **même**
     Pursuit (référence son ``pursuit_id``). Émise **après** confirmation humaine — l'appréciation ``readiness``
-    du dialogue ne l'émet jamais d'elle-même (BrainAI propose, l'humain autorise)."""
+    du dialogue ne l'émet jamais d'elle-même (BrainAI propose, l'humain autorise). ``actor`` optionnel :
+    l'identité **déclarée** (non vérifiée) à l'origine de la confirmation ; portée par ``payload['actor']`` (le
+    **besoin**, lui, ne vient jamais de l'UI — seule l'attribution de l'acte y figure)."""
     if not isinstance(pursuit_id, str) or not pursuit_id.strip():
         raise IntentError("pursuit_id (chaîne non vide) requis pour une intention 'realize'")
-    return Intent(kind="realize", pursuit_ref=pursuit_id.strip())
+    payload = {"actor": actor} if actor is not None else None
+    return Intent(kind="realize", pursuit_ref=pursuit_id.strip(), payload=payload)
 
 
 def resume_intent(pursuit_id: str, *, payload: Optional[Dict[str, Any]] = None) -> Intent:
@@ -195,6 +199,7 @@ class Stores:
     specifications: Any
     builds: Any
     turns: Any = None
+    confirmations: Any = None    # journal des confirmations humaines de convergence (D3) ; optionnel
 
 
 # --------------------------------------------------------------------- #
@@ -547,6 +552,14 @@ class BrainAI:
         # (understanding attend une chaîne) ; l'objet structuré reste la vérité dans le fait persisté.
         if (last is not None and last.get("status") == "proposed"
                 and last.get("readiness") == "ready" and matured_need_present(last.get("matured_need"))):
+            # D3 — la confirmation HUMAINE est un fait SÉPARÉ append-only (jamais une mutation du tour ready ;
+            # `ready` reste une appréciation). Il ne déclenche rien : l'arc part de l'acte `realize` humain, pas
+            # de ce fait. Acteur DÉCLARÉ / NON VÉRIFIÉ (RS-029). Enregistré seulement si un journal est fourni.
+            conf_store = getattr(context.stores, "confirmations", None)
+            if conf_store is not None:
+                actor = (intent.payload or {}).get("actor")
+                conf_store.record(build_confirmation(pursuit_ref=pursuit_id, turn_ref=last.get("turn_id"),
+                                                     as_of=clock(), actor=actor))
             need_text = matured_need_to_need_text(last.get("matured_need"))
             return self._run_arc(need_text, pursuit_id, context)  # MÊME identité, provenance conservée
         # Sinon : refus, cause distincte (le moteur ne lit aucun message — il regarde le dernier fait turn).
