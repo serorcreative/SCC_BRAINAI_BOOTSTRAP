@@ -125,3 +125,31 @@ def test_token_value_lives_only_in_returned_env():
     # la valeur n'existe que dans l'env retourné ; la fonction n'écrit ni ne journalise rien
     assert env["MYTOOL_TOKEN"] == "secret-value"
     assert list(env.keys()) == ["PATH", "LANG", "HOME", "MYTOOL_TOKEN"]   # surface minimale, rien d'autre
+
+
+# --------------------------------------------------------------------- #
+# CARACTÉRISATION du point d'arrêt de l'injectabilité (revue ClaudeS, point A, RS-057)
+# L'injectabilité de ``token_var`` existe au niveau des FONCTIONS provider_env, mais **s'arrête là** :
+# la couche adaptateur ne câble PAS ``token_var`` (constat factuel, pas une régression). Ces tests **verrouillent
+# la frontière** — ils devront être mis à jour LE JOUR où un 2e executor sera admis (câblage au niveau adaptateur).
+# --------------------------------------------------------------------- #
+def test_adapter_env_uses_claude_default_token_var_stop_point():
+    """En mode cible, ``adapter._env()`` émet toujours ``CLAUDE_CODE_OAUTH_TOKEN`` : l'adaptateur ne propose
+    aucun paramètre pour un autre nom de variable — l'injectabilité **ne traverse pas** encore la chaîne."""
+    from scc_brainai_bootstrap.builder.build import ClaudeCodeBuildAdapter
+    adapter = ClaudeCodeBuildAdapter(auth_mode=pe.AUTH_EXPLICIT_TOKEN,
+                                     isolated_home="/tmp/iso", oauth_token="tok-abc")
+    env = adapter._env()
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-abc"      # défaut Claude forcé
+    assert env["HOME"] == "/tmp/iso"
+
+
+def test_adapter_has_no_token_var_parameter_stop_point():
+    """Constat structurel : aucun adaptateur n'expose ``token_var`` (le paramètre s'arrête à provider_env)."""
+    import inspect
+    from scc_brainai_bootstrap.builder.build import ClaudeCodeBuildAdapter
+    from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
+    for cls in (ClaudeCodeBuildAdapter, ClaudeCodeUnderstandingAdapter):
+        params = inspect.signature(cls.__init__).parameters
+        assert "token_var" not in params                   # frontière RS-057 : non câblé au niveau adaptateur
+        assert "auth_mode" in params                        # ce qui EST câblé (bascule d'auth)

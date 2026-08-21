@@ -18,11 +18,15 @@ n'importe que ``os``. Isolation d'imports du ``builder`` respectée.
 
 **Pattern générique d'isolation de surface d'executor (J3 correctif, benchmark ClaudeS).** L'**isolation de HOME**
 (remplacer le HOME réel par un HOME confiné) appartient à la **politique générique** d'invocation d'un executor : elle
-prive *n'importe quel* executor de *toute* surface d'identité/credentials vivant sous le HOME réel (``~/.claude.json``,
-mais aussi ``~/.config/<outil>/``…). Le **canal de re-crédentialisation** — le **nom de la variable** par laquelle
-l'executor reçoit son jeton — est en revanche **propre à l'executor** : il est donc **paramétrable** (``token_var``),
-avec ``CLAUDE_CODE_OAUTH_TOKEN`` comme **défaut** (Claude Code = première instanciation intégrée). *Aucune nouvelle
-architecture d'executor : seul le nom de la variable devient injectable.* CONNECTER / RÉUTILISER / ADAPTER.
+supprime la **découverte conventionnelle** des surfaces situées sous le HOME réel — le fournisseur ne *trouve* plus
+``~/.claude.json`` (ni ``~/.config/<outil>/``…) via ``$HOME``. **Portée exacte (pas de survente) :** ce n'est **pas**
+un scellement du système de fichiers et cela **n'empêche pas** un accès par **chemin absolu** connu ; le résiduel
+d'un confinement niveau OS reste consigné (cf. **RS-046 (R1 J2)** — écriture/lecture hors workspace invisible à la
+collecte — et **RS-040** — confinement niveau OS non livré). Le **canal de re-crédentialisation** — le **nom de la
+variable** par laquelle l'executor reçoit son jeton — est **propre à l'executor** : il est donc **paramétrable**
+(``token_var``), avec ``CLAUDE_CODE_OAUTH_TOKEN`` comme **défaut** (Claude Code = première instanciation intégrée).
+*Aucune nouvelle architecture d'executor : seul le nom de la variable devient injectable au niveau de ces fonctions ;
+le câblage `token_var` au niveau adaptateur n'est PAS livré (RS-057).* CONNECTER / RÉUTILISER / ADAPTER.
 """
 
 from __future__ import annotations

@@ -14,9 +14,10 @@
 
 ## Banc — deux étages
 ### Étage 1 — CI, 0 $
-**658 passed, 1 skipped** (était 570+1 en fin J2 ; J3 Phase B : +13 sonde d'identité, +34 contrat d'adaptateur ;
-**J3 correctif : +12** banc `provider_env` — canal de re-crédentialisation injectable). Legacy intact ; boundary
-vert ; substituabilité verte ; anti-domaine vert. Aucun appel LLM réel dans la suite.
+**660 passed, 1 skipped** (était 570+1 en fin J2 ; J3 Phase B : +13 sonde d'identité, +34 contrat d'adaptateur ;
+**J3 correctif : +12** banc `provider_env` — canal de re-crédentialisation injectable ; **réponse revue ClaudeS :
++2** tests de caractérisation du point d'arrêt A). Legacy intact ; boundary vert ; substituabilité verte ;
+anti-domaine vert. Aucun appel LLM réel dans la suite.
 
 ### Étage 2 — réel (sous D5)
 **1 appel de sonde** (contrôle positif B1), coût réel **0,045522 $** (≤ 0,50 $ ; 1 des 3 appels autorisés). *Hors D5,
@@ -37,7 +38,7 @@ La bascule d'auth garde **B1 par défaut** : le comportement de l'arc (understan
   `native_budget`(RS-039)/`confinement`. **Rejet structurel** (`require_contract` câblé dans
   `resolve_capabilities`/`resolve_delivery`) ; **6/6 adaptateurs conformes** ; I9 (historique scopé Pursuit) ; AM6
   (principe, pas techno). **RS-047 résolue** (`budget_config.py` gouverné, source tracée).
-- **T3 — Honnêteté.** README corrigé (capacités **12→21**, tests **197→≈658**). Notices **hors dépôt** (AM5, notices
+- **T3 — Honnêteté.** README corrigé (capacités **12→21**, tests **197→≈660**). Notices **hors dépôt** (AM5, notices
   seules) : scaffolds `07_AGENTS`/`09_MONITORING`/`10_BACKUPS` (D3, « réservés ») ;
   `10_BRAINAI/src/scc_brainai/sources/NOTICE-brainai-human.md` (D1, **code non modifié**) ;
   `SCC_BRAINAI_UI/NOTICE-ARCHIVE.md` (D2). Zones builder/delivery/conversation : **sans drift** (vérifié).
@@ -55,8 +56,9 @@ l'abstraction T1 est au bon niveau, **sans** intégrer aucun executor tiers (Bas
 
 **Diagnostic A→D (validé par le propriétaire).** Un **seul couplage réel** limitait la réutilisation : le **nom de la
 variable de re-crédentialisation** était une constante figée. Le reste était déjà au bon niveau : l'**isolation de
-HOME** est générique (elle prive *tout* executor de *toute* surface sous le HOME réel) ; le **contrat d'adaptateur**
-est déjà technologie-indépendant ; le **cœur de la sonde** (détecteur + verdict) est déjà générique.
+HOME** est générique (elle **supprime la découverte conventionnelle** des surfaces sous le HOME réel — cf. portée
+exacte en B ci-dessous) ; le **contrat d'adaptateur** est déjà technologie-indépendant ; le **cœur de la sonde**
+(détecteur + verdict) est déjà générique.
 
 **Généralisation minimale livrée (Option 2, périmètre strict).**
 - `provider_env.confined_env/auth_channel/inbound_channels` : **`token_var` injectable**, **défaut
@@ -74,8 +76,34 @@ est déjà technologie-indépendant ; le **cœur de la sonde** (détecteur + ver
   isolé sans éditer le module, aucune valeur de credential persistée/exposée, gardes cible intactes.
 
 **Portée honnête obtenue.** *T1 établit un **pattern générique d'isolation de surface d'executor** : le HOME réel peut
-être remplacé par un HOME confiné et le canal de re-crédentialisation est **paramétrable**. **Claude Code en est la
-première — et seule — instanciation effectivement intégrée et testée.*** Aucun autre executor n'est déclaré compatible.
+être remplacé par un HOME confiné et le canal de re-crédentialisation est **paramétrable** (au niveau des fonctions
+`provider_env`). **Claude Code en est la première — et seule — instanciation effectivement intégrée et testée.***
+Aucun autre executor n'est déclaré compatible.
+
+### Retour de revue croisée ClaudeS — PASS SOUS RÉSERVE (aucune réserve bloquante, aucune réouverture de J3)
+Trois points de contrôle soldés **sans élargir le périmètre** ni engager J4 :
+
+**A — Traversée réelle de `token_var` (constat factuel).** La chaîne réelle est `adaptateur → _env() → confined_env()`.
+Constat : **l'injectabilité s'arrête à `provider_env`**. Les adaptateurs (`ClaudeCode…Adapter.__init__`) exposent
+`auth_mode`/`isolated_home`/`oauth_token` **mais pas `token_var`** ; `_env()` appelle `confined_env(...)` **sans**
+`token_var` → le défaut `CLAUDE_CODE_OAUTH_TOKEN` est forcé. Un `token_var` non-Claude **ne traverse donc pas** la
+chaîne réelle aujourd'hui. **Décision (conforme à la consigne) : ne PAS généraliser l'architecture adaptateur de ma
+propre initiative** — aucun 2e executor n'est à brancher. La frontière est **verrouillée par 2 tests déterministes de
+caractérisation** (l'adaptateur émet le défaut Claude ; aucun adaptateur n'expose `token_var`) et **consignée en
+RS-057**. *C'est le solde honnête de A : le pattern est générique au niveau fonction, la traversée adaptateur est une
+dette différée assumée, pas une capacité revendiquée.*
+
+**B — Portée exacte de l'isolation HOME (correction de survente).** L'isolation de HOME **supprime la découverte
+conventionnelle** des surfaces situées sous le HOME réel (le fournisseur ne *trouve* plus `~/.claude.json` via
+`$HOME`). Elle **ne constitue PAS un scellement du système de fichiers** et **n'empêche PAS** un accès par **chemin
+absolu** connu. Le résiduel de confinement niveau OS reste consigné (**RS-046 (R1 J2)** — hors-workspace invisible à
+la collecte ; **RS-040** — confinement OS non livré). Formulation corrigée partout (docstring `provider_env`, présent
+rapport, RS-030).
+
+**C — Nature de RS-056 (prérequis d'exploitation, pas dette d'ingénierie).** La levée de RS-056 **ne dépend pas d'un
+travail d'ingénierie** (le code cible existe et est testé au niveau fonction) : elle dépend d'un **acte humain de
+provisionnement du jeton par la propriétaire**. Cet acte **conditionne** (a) la preuve d'étanchéité cible **et** (b)
+l'admission d'un **second executor**. Consigné comme tel dans RS-056.
 
 ## Résultat de la sonde — comptages seuls (aucune identité réelle)
 - **Surface d'identité énumérée** : **11 champs** (`emailAddress`, `displayName`, `organizationName/Uuid/Role`,
@@ -130,14 +158,19 @@ première — et seule — instanciation effectivement intégrée et testée.***
 
 ## RS-2 — re-statuées / créées / levées
 - **RS-030** `résolue partielle(J3)` (fuite prouvée B1 + mécanisme livré ; **portée précisée** correctif `6b14247` :
-  isolation HOME générique + `token_var` injectable, Claude = 1re instanciation ; cible différée **RS-056**).
+  isolation HOME = **suppression de la découverte conventionnelle** sous le HOME réel — **pas un scellement FS**, accès
+  par chemin absolu non empêché (cf. RS-046 / RS-040) ; `token_var` injectable **au niveau fonction seulement**
+  (RS-057) ; Claude = 1re instanciation ; cible différée **RS-056**).
 - **RS-039** `résolue partielle(J3)` (intégrée au contrat : `usd_cap=aggregate_stop`, jamais « hard »).
-- **RS-047** `résolue(J3)` (budget gouverné). **RS-024** `résolue partielle(J3)` (README 12→21, 197→~658).
+- **RS-047** `résolue(J3)` (budget gouverné). **RS-024** `résolue partielle(J3)` (README 12→21, 197→~660).
 - **RS-011** `archivée honnêtement(D1)` · **RS-010** `archivée(D2)` · **RS-023** `étiquetée(D3)`.
 - **RS-012** `absorbée (table produite, D4)` · **RS-015** `doctrine écrite(J3)`.
 - **RS-049** (échelle PREUVE-B) reste `consignée` ; **RS-050** `levée` (chartes OCOS sourcées).
+- **RS-056** (provisionnement jeton cible) **précisée (revue ClaudeS/C)** : **prérequis d'exploitation** (acte humain
+  propriétaire), **pas dette d'ingénierie** ; conditionne la preuve cible **et** l'admission d'un 2e executor.
 - **Créées** : **RS-051** (verrou stores), **RS-053** (architecture canonique/MOAT #6), **RS-054** (objet Version +
-  boucle modification), **RS-055** (alerte sécurité modèle), **RS-056** (provisionnement jeton cible). **RS-052 non
+  boucle modification), **RS-055** (alerte sécurité modèle), **RS-056** (provisionnement jeton cible), **RS-057**
+  (injectabilité `token_var` non traversante au niveau adaptateur — frontière assumée, revue ClaudeS/A). **RS-052 non
   créée** (doublon RS-021, enrichie). **RS-020/RS-021** enrichies.
 
 ## Leçons du chantier
@@ -160,8 +193,16 @@ défaut gouverné** (bascule prête ; B1 reste défaut jusqu'au PASS cible) · �
 `brainai-human`/UI Tauri traités (D1/D2) · ✅ scaffolds étiquetés (D3) · ✅ OWNER MODE / OCOS / multi-tenant
 **documentés** · ✅ Parcours 1 vert · ✅ legacy intact · ✅ I1→I9 préservés · ✅ rapport autonome remis.
 
-**Limite explicite non levée** : la **preuve d'étanchéité du dispositif cible** (RS-056) — elle exige un acte
-propriétaire de provisionnement du jeton. La bascule reste **B1 par défaut** (RS-4) tant que la cible n'a pas PASS.
+**Limites explicites non levées (aucune survente)** :
+- **Preuve d'étanchéité du dispositif cible** (RS-056) — **prérequis d'exploitation** : elle exige un **acte
+  propriétaire** de provisionnement du jeton (pas un travail d'ingénierie). B1 reste **défaut** (RS-4) tant que la
+  cible n'a pas PASS.
+- **Portée de l'isolation HOME** — elle **supprime la découverte conventionnelle** sous le HOME réel, mais **n'est pas
+  un scellement du système de fichiers** : un accès par **chemin absolu** connu n'est pas empêché (RS-046 R1 / RS-040,
+  confinement OS non livré).
+- **Traversée `token_var`** — injectable **au niveau des fonctions `provider_env`**, **pas** au niveau adaptateur
+  (RS-057) : un 2e executor exigera le câblage adaptateur + son loader/runner de sonde. **Aucun executor tiers n'est
+  déclaré compatible ni testé** à ce stade.
 
 ---
 *STOP après clôture. **AUCUN J4** sans revue croisée Rose + ClaudeS **et** GO explicite de Frédérique.
