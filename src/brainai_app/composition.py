@@ -34,10 +34,10 @@ from brainai_app.delivery.service import run_delivery
 from brainai_app.delivery.verify import VerificationStore
 
 from brainai_app.contract import CONTRACT_VERSION
+from brainai_app.delivery.budget_config import load_delivery_budget
 
-# Budget de livraison J2 (Étage 2) — plafond monétaire (best-effort borné) + plafond d'appels (garde dure).
-DELIVERY_CEILING_USD = 3.0
-DELIVERY_MAX_CALLS = 2
+# Budget de livraison — **gouverné** (RS-047) : plus de constante câblée. Résolution explicite > env > défaut,
+# source tracée. Plafond USD = best-effort borné (RS-039) ; plafond d'appels = garde dure. Voir ``budget_config``.
 
 # Jalon du moteur exposé à l'UI (informationnel) — première faculté : Need→Understanding→Specification→Build.
 BRAINAI_VERSION = "arc-propose-001"
@@ -353,17 +353,20 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Opti
     if spec_fact is None:
         return None
     delivery_caps = providers.real_delivery()                     # site_build + preview, résolus via le registre
-    ceiling = min(float(budget_usd) if budget_usd else DELIVERY_CEILING_USD, DELIVERY_CEILING_USD)
+    # Budget **gouverné** (RS-047) : env > défaut, source tracée ; ``budget_usd`` (réalisation) borne le plafond.
+    budget_cfg = load_delivery_budget()
+    ceiling = min(float(budget_usd), budget_cfg.ceiling_usd) if budget_usd else budget_cfg.ceiling_usd
     workspace = Workspace(root / "delivery_exec", "site")          # workspace dédié à la livraison (confiné)
     report = run_delivery(
         spec_source=spec_fact, workspace=workspace, project_id="site", pursuit_ref=outcome.pursuit_id,
         site_build=delivery_caps.site_build, preview=delivery_caps.preview,
-        budget=BudgetLedger(root / "budget.jsonl", ceiling_usd=ceiling, max_calls=DELIVERY_MAX_CALLS),
+        budget=BudgetLedger(root / "budget.jsonl", ceiling_usd=ceiling, max_calls=budget_cfg.max_calls),
         build_store=BuildStore(root / "site_build.jsonl"),
         tool_store=ToolInvocationStore(root / "tinv.jsonl"),
         run_store=BuildRunStore(root / "run_events.jsonl"),
         verification_store=VerificationStore(root / "verifications.jsonl"),
         delivered_store=DeliveredStore(root / "delivered.jsonl"))
+    report["budget_config"] = budget_cfg.to_dict()                # traçabilité gouvernée (RS-047)
 
     # T5 — écriture mémoire minimale, DEPUIS l'app uniquement, sur succès (écriture seule, aucune récupération).
     if report.get("status") == "delivered":

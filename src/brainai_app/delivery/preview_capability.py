@@ -40,5 +40,11 @@ class LocalPreviewAdapter:
         """Ouvre une preview locale **vivante** (serveur loopback démarré). L'appelant ferme le handle (``close``)."""
         return WorkspacePreview(workspace, entrypoint=entrypoint).start()
 
+    def contract(self):
+        """Contrat d'adaptateur complet (T2) — capacité **locale** : aucun appel fournisseur, aucun canal d'auth
+        externe, coût ``unavailable``, confinement loopback + jeton + default-deny + ``resolve_within``."""
+        from scc_brainai_bootstrap.builder.adapter_contract import local_surface_contract
+        return local_surface_contract(capability=self.capability)
+
 
 __all__ = ["PreviewCapability", "LocalPreviewAdapter"]

@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
+from scc_brainai_bootstrap.builder.adapter_contract import require_contract
 from scc_brainai_bootstrap.builder.brainai import Capabilities
 from scc_brainai_bootstrap.builder.build import ClaudeCodeBuildAdapter
 from scc_brainai_bootstrap.builder.conversation import ClaudeCodeConversationAdapter
@@ -111,9 +112,13 @@ def resolve_capability(slug: str, descriptors: List[AgentDescriptor],
 def resolve_capabilities(descriptors: List[AgentDescriptor],
                          binders: Dict[Tuple[str, str], Callable[[], Any]]) -> Capabilities:
     """Assemble les :class:`Capabilities` du chemin produit en **résolvant** chaque capacité (aucun nom de
-    fournisseur ici : tout vient des descriptors/binder)."""
-    resolved = {_CAPABILITY_TO_FIELD[slug]: resolve_capability(slug, descriptors, binders)
-                for slug in CAPABILITY_SLUGS}
+    fournisseur ici : tout vient des descriptors/binder). **Rejet structurel** (T2) : tout adaptateur résolu dont le
+    contrat est incomplet est refusé via ``require_contract`` (aucune capacité non déclarée sur le chemin produit)."""
+    resolved: Dict[str, Any] = {}
+    for slug in CAPABILITY_SLUGS:
+        impl = resolve_capability(slug, descriptors, binders)
+        require_contract(impl)                              # contrat d'adaptateur complet exigé (T2)
+        resolved[_CAPABILITY_TO_FIELD[slug]] = impl
     return Capabilities(**resolved)
 
 
@@ -170,10 +175,13 @@ def delivery_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
 
 def resolve_delivery(descriptors: List[AgentDescriptor],
                      binders: Dict[Tuple[str, str], Callable[[], Any]]) -> DeliveryCapabilities:
-    """Résout les capacités de livraison **via le registre** (aucun fournisseur connu de l'appelant)."""
-    return DeliveryCapabilities(
-        site_build=resolve_capability(BUILD_SITE, descriptors, binders),
-        preview=resolve_capability(PREVIEW_LOCAL, descriptors, binders))
+    """Résout les capacités de livraison **via le registre** (aucun fournisseur connu de l'appelant). **Rejet
+    structurel** (T2) des adaptateurs à contrat incomplet via ``require_contract``."""
+    site_build = resolve_capability(BUILD_SITE, descriptors, binders)
+    preview = resolve_capability(PREVIEW_LOCAL, descriptors, binders)
+    require_contract(site_build)
+    require_contract(preview)
+    return DeliveryCapabilities(site_build=site_build, preview=preview)
 
 
 def real_delivery() -> DeliveryCapabilities:

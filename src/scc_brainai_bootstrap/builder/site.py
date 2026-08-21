@@ -27,8 +27,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
+from scc_brainai_bootstrap.builder.adapter_contract import AdapterContract, claude_site_contract
 from scc_brainai_bootstrap.builder.build import _failure_reason, validate_spec_source
 from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
+from scc_brainai_bootstrap.builder.provider_env import (
+    AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
 from scc_brainai_bootstrap.builder.tool_runner import run_confined
 from scc_brainai_bootstrap.builder.workspace import Workspace, WorkspaceError
 from scc_brainai_bootstrap.core.clock import digest
@@ -85,11 +88,16 @@ class ClaudeCodeSiteAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 180.0, claude_bin: str = "claude"):
+                 timeout: float = 180.0, claude_bin: str = "claude",
+                 auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
+                 oauth_token: Optional[str] = None):
         self.model = model
         self.max_budget_usd = max_budget_usd
         self.timeout = timeout
         self.claude_bin = claude_bin
+        self.auth_mode = auth_mode              # bascule d'auth (B1 défaut) — étanchéité J3/T1
+        self.isolated_home = isolated_home
+        self.oauth_token = oauth_token
 
     def build_argv(self, prompt: str) -> List[str]:
         """argv **only** : print non-interactif ; modèle explicite ; plafond coût **natif** du fournisseur ;
@@ -106,13 +114,18 @@ class ClaudeCodeSiteAdapter:
         ]
 
     def _env(self) -> Dict[str, str]:
-        # Env minimal confiné, identique aux autres capacités : PATH/LANG + HOME/USER/LOGNAME si présents.
-        # Aucun secret, aucun token ; l'environnement du parent n'est jamais hérité en bloc.
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"), "LANG": "C.UTF-8"}
-        for k in ("HOME", "USER", "LOGNAME"):
-            if os.environ.get(k):
-                env[k] = os.environ[k]
-        return env
+        # Env confiné **centralisé** (provider_env) selon la bascule d'auth : B1 (défaut) = comportement
+        # historique ; cible = HOME isolé + jeton explicite (étanchéité J3/T1, RS-030). Canal d'auth déclaré (AM6).
+        return confined_env(self.auth_mode, isolated_home=self.isolated_home, oauth_token=self.oauth_token)
+
+    def contract(self) -> AdapterContract:
+        """Contrat d'adaptateur complet (T2) — build de site : ``Write``/``Read`` **autorisés**, écriture
+        auto-acceptée dans le cwd (``acceptEdits``), ``Bash``/réseau désactivés. Coût réel (I6), plafond natif =
+        arrêt agrégé (RS-039)."""
+        return claude_site_contract(
+            capability=self.capability, auth_channel=auth_channel(self.auth_mode),
+            inbound_channels=inbound_channels(self.auth_mode), tools_allowed=["Write", "Read"],
+            tools_disallowed=["Bash", "WebSearch", "WebFetch"], permission_mode="acceptEdits")
 
     def build(self, spec: Dict[str, Any], *, cwd: Path, budget_remaining_usd: float) -> Dict[str, Any]:
         """**Appel réel facturable**. Garde budget AVANT (R2) : refuse sans appel si le reste ne couvre pas le
