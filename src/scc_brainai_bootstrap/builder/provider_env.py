@@ -15,6 +15,14 @@ l'environnement confiné et **déclare** le canal d'auth, derrière une **bascul
 principe de contrat (AM6) est **indépendant de la technologie** : un autre fournisseur déclarera clé API / OAuth de
 service / secret manager — le contrat impose *auth explicite + canal déclaré*, pas une techno précise. Stdlib pur ;
 n'importe que ``os``. Isolation d'imports du ``builder`` respectée.
+
+**Pattern générique d'isolation de surface d'executor (J3 correctif, benchmark ClaudeS).** L'**isolation de HOME**
+(remplacer le HOME réel par un HOME confiné) appartient à la **politique générique** d'invocation d'un executor : elle
+prive *n'importe quel* executor de *toute* surface d'identité/credentials vivant sous le HOME réel (``~/.claude.json``,
+mais aussi ``~/.config/<outil>/``…). Le **canal de re-crédentialisation** — le **nom de la variable** par laquelle
+l'executor reçoit son jeton — est en revanche **propre à l'executor** : il est donc **paramétrable** (``token_var``),
+avec ``CLAUDE_CODE_OAUTH_TOKEN`` comme **défaut** (Claude Code = première instanciation intégrée). *Aucune nouvelle
+architecture d'executor : seul le nom de la variable devient injectable.* CONNECTER / RÉUTILISER / ADAPTER.
 """
 
 from __future__ import annotations
@@ -28,19 +36,22 @@ AUTH_EXPLICIT_TOKEN = "explicit_token"    # cible — HOME isolé + jeton explic
 
 AUTH_MODES = (AUTH_KEYCHAIN_HOME, AUTH_EXPLICIT_TOKEN)
 
-# Nom de la variable de jeton (choix d'implémentation Claude Code du jour — AM6 : non dogmatique).
+# Nom **par défaut** de la variable de jeton (Claude Code = première instanciation intégrée — AM6 : non dogmatique).
+# Le canal de re-crédentialisation est **propre à l'executor** : injectable via ``token_var`` (défaut ci-dessous).
 OAUTH_TOKEN_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
 
 
 def confined_env(auth_mode: str = AUTH_KEYCHAIN_HOME, *, isolated_home: Optional[str] = None,
-                 oauth_token: Optional[str] = None) -> Dict[str, str]:
+                 oauth_token: Optional[str] = None, token_var: str = OAUTH_TOKEN_VAR) -> Dict[str, str]:
     """Calcule l'environnement **confiné** transmis au sous-processus fournisseur, selon le mode d'auth.
 
     ``keychain_home`` (défaut) : ``PATH``/``LANG`` + ``HOME``/``USER``/``LOGNAME`` présents — **identique** au
     comportement historique (aucune régression du Parcours 1). ``explicit_token`` : ``PATH``/``LANG`` + ``HOME`` =
-    ``isolated_home`` (répertoire propre) + ``CLAUDE_CODE_OAUTH_TOKEN`` = ``oauth_token`` ; **aucun** ``USER``/
-    ``LOGNAME``, **aucun** ``HOME`` personnel. Lève si le mode cible est demandé sans ``isolated_home`` **et**
-    ``oauth_token`` (on ne fabrique jamais une auth silencieuse)."""
+    ``isolated_home`` (répertoire propre) + ``token_var`` = ``oauth_token`` ; **aucun** ``USER``/``LOGNAME``,
+    **aucun** ``HOME`` personnel. ``token_var`` (**défaut** ``CLAUDE_CODE_OAUTH_TOKEN``) est le **canal de
+    re-crédentialisation propre à l'executor** : l'isolation de HOME est générique, seul le nom de la variable est
+    injectable — un executor futur fournit le sien sans éditer ce module. Lève si le mode cible est demandé sans
+    ``isolated_home`` **et** ``oauth_token`` (on ne fabrique jamais une auth silencieuse)."""
     if auth_mode not in AUTH_MODES:
         raise ValueError(f"auth_mode inconnu : {auth_mode!r} (attendu ∈ {AUTH_MODES})")
     env: Dict[str, str] = {"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"), "LANG": "C.UTF-8"}
@@ -53,26 +64,28 @@ def confined_env(auth_mode: str = AUTH_KEYCHAIN_HOME, *, isolated_home: Optional
     # AUTH_EXPLICIT_TOKEN — cible : HOME isolé + jeton explicite, aucune surface personnelle.
     if not isolated_home or not oauth_token:
         raise ValueError("auth explicit_token exige isolated_home ET oauth_token (aucune auth fabriquée)")
+    if not token_var or not str(token_var).strip():
+        raise ValueError("token_var vide : le canal de re-crédentialisation doit être nommé")
     env["HOME"] = str(isolated_home)
-    env[OAUTH_TOKEN_VAR] = str(oauth_token)
+    env[str(token_var)] = str(oauth_token)
     return env
 
 
-def auth_channel(auth_mode: str = AUTH_KEYCHAIN_HOME) -> Dict[str, Any]:
+def auth_channel(auth_mode: str = AUTH_KEYCHAIN_HOME, *, token_var: str = OAUTH_TOKEN_VAR) -> Dict[str, Any]:
     """**Déclaration** du canal d'auth (pour le contrat d'adaptateur, T2). ``leaks_identity`` reflète la surface
     d'identité **structurellement exposée** au fournisseur — c'est une propriété de conception, la preuve empirique
-    revient à la sonde (Q1)."""
+    revient à la sonde (Q1). ``token_var`` nomme le canal de re-crédentialisation (défaut Claude Code)."""
     if auth_mode == AUTH_KEYCHAIN_HOME:
         return {"kind": AUTH_KEYCHAIN_HOME, "explicit": False, "leaks_identity": True,
                 "detail": "trousseau via HOME (~/.claude.json lisible) — barreau B1"}
-    return {"kind": AUTH_EXPLICIT_TOKEN, "explicit": True, "leaks_identity": False,
-            "detail": "HOME isolé + jeton explicite (CLAUDE_CODE_OAUTH_TOKEN), aucune surface personnelle"}
+    return {"kind": AUTH_EXPLICIT_TOKEN, "explicit": True, "leaks_identity": False, "token_var": str(token_var),
+            "detail": f"HOME isolé + jeton explicite ({token_var}), aucune surface personnelle"}
 
 
-def inbound_channels(auth_mode: str = AUTH_KEYCHAIN_HOME) -> List[Dict[str, Any]]:
+def inbound_channels(auth_mode: str = AUTH_KEYCHAIN_HOME, *, token_var: str = OAUTH_TOKEN_VAR) -> List[Dict[str, Any]]:
     """**Déclaration** de tout ce que le runtime peut injecter dans le contexte du modèle (RV-2 étendue) : clés
     d'environnement transmises, fichiers de configuration de session lus par le fournisseur, ``cwd``, ``argv``.
-    Ne porte **jamais** la Pursuit entière (I9)."""
+    Ne porte **jamais** la Pursuit entière (I9). ``token_var`` nomme le canal de re-crédentialisation cible."""
     channels: List[Dict[str, Any]] = [
         {"channel": "argv", "carries": "prompt (mission bornée), flags", "pursuit_scoped": True},
         {"channel": "cwd", "carries": "workspace confiné de la Pursuit", "pursuit_scoped": True},
@@ -84,7 +97,7 @@ def inbound_channels(auth_mode: str = AUTH_KEYCHAIN_HOME) -> List[Dict[str, Any]
                          "pursuit_scoped": False, "identity_surface": True,
                          "note": "lu par le binaire fournisseur, hors flux capturé (RV-1 ne le voit pas)"})
     else:
-        channels.append({"channel": "env:HOME(isolé)+CLAUDE_CODE_OAUTH_TOKEN", "carries": "jeton d'auth explicite",
+        channels.append({"channel": f"env:HOME(isolé)+{token_var}", "carries": "jeton d'auth explicite",
                          "pursuit_scoped": False, "identity_surface": False,
                          "note": "HOME isolé sans ~/.claude.json personnel — à prouver par la sonde"})
     return channels
