@@ -402,7 +402,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # ≈ 646 tests déterministes, 0 € (instantané JALON 3 ; le compte croît par jalon)
+python -m pytest -q      # ≈ 658 tests déterministes, 0 € (instantané JALON 3 ; le compte croît par jalon)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
