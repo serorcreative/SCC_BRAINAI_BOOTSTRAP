@@ -102,6 +102,13 @@ post-v1 ; brainai-human→J3). **Aucune destination rouverte, aucun arbitrage mo
 | RS-047 | **(R4) Plafonds de livraison câblés en constantes** — `DELIVERY_CEILING_USD=3.0` / `DELIVERY_MAX_CALLS=2` (`composition.py:39-40`) sont des constantes, non une **configuration gouvernée** (par Pursuit/propriétaire, tracée). | 2026-08-21 | Revue clôture J2 | `consignée` | **J3/J6** — budget de première classe configurable (lié au contrat d'adaptateur Q2 / RS-039) |
 | RS-048 | **(R6) Vérification de citation D1** — la correction « jamais silencieux : R6 → RV-1 » est **présente et cohérente** dans l'arbre (R6 = *aucun retry* ; RV-1 = *diagnostic/redaction*). Aucun stale miscitation détecté. | 2026-08-21 | Revue clôture J2 (D1 Phase A) | **`résolue` (vérifiée)** | — |
 
+## 10. Jalon 3 — Phase A (inspection) : dettes/INCONNU consignés
+| ID | Dette / INCONNU | Date | Origine | Statut | Destination |
+|---|---|---|---|---|---|
+| RS-049 | **Échelle d'auth PREUVE-A/PREUVE-B non documentée dans l'arbre** — seul le barreau **B1** (trousseau macOS, `understanding.py:191-195`) est décrit ; le rapport forensique Tour 3 et les autres barreaux sont INCONNU (référencés, hors dépôt). | 2026-08-21 | J3 Phase A (Q1) | `consignée` | Documenter l'échelle lors du dispositif d'étanchéité (J3 Phase B) ; sourcer le forensique Tour 3 |
+| RS-050 | **Chartes OCOS-001/002/003 hors arbre** — texte introuvable ; la table d'absorption (Q5) est bâtie sur le mapping RS-012, à compléter si les archives sont fournies (D4). | 2026-08-21 | J3 Phase A (Q5) | `consignée` | Table OCOS↔V2 (J3 Phase B) ; sourcing chartes = arbitrage Frédérique (D4) |
+| RS-024↺ | **Drift doc précisé** — `README.md:227` (« CAPACITÉS (12) » → 21) et `README.md:405` (« 197 tests » → ~599). Zones builder/delivery/conversation **sans drift**. | 2026-08-21 | J3 Phase A (Q3) | `consignée` | Correction en J3 Phase B (passe d'honnêteté, zones J0–J2) |
+
 ---
 
 *Toute nouvelle idée/dette est ajoutée ici avec un ID `RS-0xx`, une date, une origine, un statut et une destination.
