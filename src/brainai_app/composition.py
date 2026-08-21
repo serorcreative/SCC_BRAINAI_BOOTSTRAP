@@ -23,10 +23,21 @@ from scc_brainai_bootstrap.builder.builds import BuildStore
 from scc_brainai_bootstrap.builder.confirmations import ConfirmationStore
 from scc_brainai_bootstrap.builder.proposals import ProposalStore
 from scc_brainai_bootstrap.builder.specifications import SpecificationStore
+from scc_brainai_bootstrap.builder.tool_invocations import ToolInvocationStore
 from scc_brainai_bootstrap.builder.turns import TurnStore
 from scc_brainai_bootstrap.builder.workspace import Workspace
+from brainai_app.delivery.budget import BudgetLedger
+from brainai_app.delivery.delivered import DeliveredStore
+from brainai_app.delivery.memory import MemoryUnavailable, open_memory_store, write_delivery_memory
+from brainai_app.delivery.runner import BuildRunStore
+from brainai_app.delivery.service import run_delivery
+from brainai_app.delivery.verify import VerificationStore
 
 from brainai_app.contract import CONTRACT_VERSION
+
+# Budget de livraison J2 (Étage 2) — plafond monétaire (best-effort borné) + plafond d'appels (garde dure).
+DELIVERY_CEILING_USD = 3.0
+DELIVERY_MAX_CALLS = 2
 
 # Jalon du moteur exposé à l'UI (informationnel) — première faculté : Need→Understanding→Specification→Build.
 BRAINAI_VERSION = "arc-propose-001"
@@ -315,11 +326,67 @@ def converse(message: str, *, pursuit_ref: Optional[str] = None, mode: str = "de
     return to_viewmodel(outcome, need=message, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
 
 
+def _spec_fact_for(stores: Stores, outcome: Any) -> Optional[Dict[str, Any]]:
+    """Retrouve le **fait Spécification** proposé par l'arc (source du build réel), par son ``fact_id``."""
+    spec_id = None
+    for s in outcome.steps:
+        if s.get("faculty") == "specification" and s.get("status") == "proposed":
+            spec_id = s.get("fact_id")
+    if not spec_id:
+        return None
+    for f in stores.specifications.read_all():
+        if f.get("specification_id") == spec_id:
+            return f
+    return None
+
+
+def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Optional[Dict[str, Any]]:
+    """Livraison **réelle** post-arc (JALON 2) : build confiné du site → preview locale → vérification HTTP 200
+    (liée au hash) → fait ``delivered`` → **écriture mémoire minimale** (T5, depuis l'app uniquement). Ne s'exécute
+    qu'après un arc **réussi** (``awaiting``/``governance``). Renvoie un résumé, ou ``None`` si non applicable."""
+    from brainai_app import providers                              # résolution de capacités (aucun fournisseur ici)
+
+    stores = Stores(proposals=ProposalStore(root / "prop.jsonl"),
+                    specifications=SpecificationStore(root / "spec.jsonl"),
+                    builds=BuildStore(root / "build.jsonl"))
+    spec_fact = _spec_fact_for(stores, outcome)
+    if spec_fact is None:
+        return None
+    delivery_caps = providers.real_delivery()                     # site_build + preview, résolus via le registre
+    ceiling = min(float(budget_usd) if budget_usd else DELIVERY_CEILING_USD, DELIVERY_CEILING_USD)
+    workspace = Workspace(root / "delivery_exec", "site")          # workspace dédié à la livraison (confiné)
+    report = run_delivery(
+        spec_source=spec_fact, workspace=workspace, project_id="site", pursuit_ref=outcome.pursuit_id,
+        site_build=delivery_caps.site_build, preview=delivery_caps.preview,
+        budget=BudgetLedger(root / "budget.jsonl", ceiling_usd=ceiling, max_calls=DELIVERY_MAX_CALLS),
+        build_store=BuildStore(root / "site_build.jsonl"),
+        tool_store=ToolInvocationStore(root / "tinv.jsonl"),
+        run_store=BuildRunStore(root / "run_events.jsonl"),
+        verification_store=VerificationStore(root / "verifications.jsonl"),
+        delivered_store=DeliveredStore(root / "delivered.jsonl"))
+
+    # T5 — écriture mémoire minimale, DEPUIS l'app uniquement, sur succès (écriture seule, aucune récupération).
+    if report.get("status") == "delivered":
+        try:
+            store = open_memory_store(_state_root() / "memory")
+            entry = write_delivery_memory(
+                store, pursuit_ref=outcome.pursuit_id, project="site",
+                result=spec_fact.get("specification", {}).get("product_objective", ""),
+                decisions=["convergence confirmée (humain)", "build réel confiné", "vérification HTTP 200 (hash)"],
+                artifact_ref=report.get("build", {}).get("artefact"), preview_ref=report.get("preview_ref"),
+                provenance_ids=report.get("provenance", {}), as_of=outcome.as_of)
+            report["memory_id"] = getattr(entry, "id", None)
+        except MemoryUnavailable as exc:
+            report["memory_error"] = str(exc)                     # honnête : jamais silencieux
+    return report
+
+
 def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
             actor: Any = None) -> Dict[str, Any]:
     """**Confirmation humaine** : poursuit la **même** Pursuit vers l'arc. Le besoin (``matured_need``) est relu
     **côté moteur** depuis les tours ; l'UI n'en fournit aucun. ``actor`` = identité **déclarée** (non vérifiée)
-    à l'origine de la confirmation ; enregistrée comme fait ``convergence_confirmed`` séparé (D3)."""
+    à l'origine de la confirmation ; enregistrée comme fait ``convergence_confirmed`` séparé (D3). En mode
+    **réel**, un arc réussi enchaîne la **livraison réelle** (build → preview → vérification → ``delivered``)."""
     caps = _capabilities(mode)
     root = _session_dir(pursuit_ref)
     ctx = _session_context(root, budget_usd=budget_usd)
@@ -329,7 +396,12 @@ def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     root = _settle_dir(root, outcome.pursuit_id)                 # no-op hors transit (realize a toujours un pursuit_ref)
     _remember(outcome.pursuit_id, root)
-    return to_viewmodel(outcome, need=None, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
+    vm = to_viewmodel(outcome, need=None, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
+    if mode == "real" and outcome.state == "awaiting" and outcome.wait_reason == "governance":
+        delivery = _deliver(root, outcome, actor=actor, budget_usd=budget_usd)
+        if delivery is not None:
+            vm["delivery"] = delivery
+    return vm
 
 
 __all__ = ["demo_capabilities", "real_capabilities", "to_viewmodel", "run_pursuit", "converse", "realize"]
