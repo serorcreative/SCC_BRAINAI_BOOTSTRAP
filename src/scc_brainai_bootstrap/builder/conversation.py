@@ -302,14 +302,14 @@ def build_turn(*, message: str, prompt: str, capability: str, adapter: str, mode
         return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
                 "error": "format tour invalide", "diagnostic": diag}
     matured = normalize_matured_need(turn.get("matured_need"))   # structure C9 (ou None), lecture legacy tolérée
-    has_matured = matured is not None                            # le modèle a fourni un contenu de besoin mûri
-    # Garde de cohérence A4-2 : un ``matured_need`` n'a de sens qu'avec une appréciation ``ready``. Un besoin
-    # « mûri » porté par un tour ``continue`` est une incohérence cognitive (maturité affirmée sans l'avoir
-    # jugée) ⇒ tour **non conforme**, ``failed``. Ainsi un ``matured_need`` ne vit jamais que sur un ``ready`` —
-    # ce que la garde de convergence de ``realize`` (A4-1) suppose côté relecture.
-    if has_matured and turn["readiness"] != "ready":
-        return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
-                "error": "matured_need sans appréciation ready", "diagnostic": diag}
+    # A4-2 (CORRIGÉE — défaut révélé par le test produit réel, pursuit_e4b6033b3b08 tour 8) : ``matured_need`` et
+    # ``readiness='continue'`` **COEXISTENT** légitimement (« le besoin est mûr, mais je continue à concevoir /
+    # challenger, sans réaliser »). Un tel tour est donc **valide / ``proposed``**, le ``matured_need`` est
+    # **CONSERVÉ** (jamais perdu, jamais nulled) et le message **reste dans l'historique** relu par le modèle.
+    # La **réalisation reste impossible** sans ``ready`` : ``BrainAI._realize`` (garde A4-1) n'autorise l'arc que si
+    # le DERNIER tour est ``ready`` + ``matured_need``, ET sur acte humain explicite ``realize`` (confirmation D3) —
+    # un ``continue`` ne l'ouvre jamais. La ``readiness`` du modèle est respectée telle quelle : rien n'est
+    # transformé en ``ready`` artificiellement, rien n'est réalisé automatiquement.
     # Garde de cohérence C8/C9 : un besoin **mûr** doit être **définissable**. Un ``ready`` sans ``besoin
     # fondamental`` non vide est incohérent ⇒ ``failed``. La présence d'``inconnues_nommees`` NE bloque PAS un
     # ``ready`` (C8) : seules comptent la présence et la non-vacuité du besoin fondamental (helper unique).

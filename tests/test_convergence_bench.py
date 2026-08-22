@@ -74,9 +74,12 @@ def test_bench_matured_present_helper_not_dict_truthiness():
 # ===================================================================== #
 # A4-2 + C8 — gardes de cohérence
 # ===================================================================== #
-def test_bench_a4_2_matured_only_with_ready():
+def test_bench_a4_2_continue_with_matured_is_valid_and_kept():
+    # A4-2 CORRIGÉE (défaut du test produit réel) : continue + matured_need COEXISTENT — tour valide/proposed,
+    # matured_need CONSERVÉ, conversation continue. La réalisation reste gouvernée par ready + realize (A4-1/D3).
     f = _turn({"reply": "r", "readiness": "continue", "matured_need": _matured("besoin")})
-    assert f["status"] == "failed" and f["error"] == "matured_need sans appréciation ready"
+    assert f["status"] == "proposed" and f["readiness"] == "continue"
+    assert f["matured_need"] == _matured("besoin") and f["error"] is None   # jamais perdu, jamais nulled
 
 
 def test_bench_c8_ready_requires_besoin_but_allows_named_unknowns():
