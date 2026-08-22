@@ -148,9 +148,9 @@ def test_site_build_failure_client_error_is_failed_fact(tmp_path):
 
 def test_site_build_timeout_is_failed_fact(tmp_path):
     out, _ = _produce(tmp_path, FakeSite(behavior="timeout"))
-    assert out["fact"]["status"] == "failed" and out["fact"]["error"] == "timeout"
+    assert out["fact"]["status"] == "failed" and out["fact"]["error"] == "safety_watchdog_exceeded"
     tinv = ToolInvocationStore(tmp_path / "t.jsonl").read_all()
-    assert tinv[0]["status"] == "timeout" and tinv[0]["timed_out"] is True
+    assert tinv[0]["status"] == "timeout" and tinv[0]["timed_out"] is True   # statut BRUT ToolInvocation inchangé
 
 
 def test_missing_entrypoint_is_failure(tmp_path):

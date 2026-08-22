@@ -37,7 +37,8 @@ from scc_brainai_bootstrap.builder.adapter_contract import AdapterContract, clau
 from scc_brainai_bootstrap.builder.cognitive_identity import CONDENSED_IDENTITY, compose_prompt
 from scc_brainai_bootstrap.builder.provider_env import (
     AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
-from scc_brainai_bootstrap.builder.tool_runner import run_confined
+from scc_brainai_bootstrap.builder.tool_runner import (
+    DEFAULT_WATCHDOG_S, SAFETY_WATCHDOG_EXCEEDED, run_confined)
 from scc_brainai_bootstrap.core.clock import digest
 
 # Schéma **structuré** attendu de la Spécification (sortie forcée par ``--json-schema``). Onze champs
@@ -178,7 +179,7 @@ def build_specification(*, brief_source: Dict[str, Any], prompt: str, capability
     if (timed_out or envelope is None or nonzero_exit
             or envelope.get("is_error") or envelope.get("subtype") != "success"):
         if timed_out:
-            reason = "timeout"
+            reason = SAFETY_WATCHDOG_EXCEEDED   # PAS un timeout de cognition : fusible de dernier recours
         elif envelope is None:
             reason = "enveloppe illisible"
         elif nonzero_exit:
@@ -232,7 +233,7 @@ class ClaudeCodeSpecificationAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 120.0, claude_bin: str = "claude",
+                 timeout: float = DEFAULT_WATCHDOG_S, claude_bin: str = "claude",
                  auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
                  oauth_token: Optional[str] = None):
         self.model = model

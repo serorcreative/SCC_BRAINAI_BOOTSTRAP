@@ -24,6 +24,7 @@ from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationA
 from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
 from scc_brainai_bootstrap.core.config import BrainAIConfig
 from brainai_app.delivery.preview_capability import LocalPreviewAdapter
+from brainai_app.delivery.watchdog_config import load_call_watchdog
 from scc_brainai_bootstrap.registry import AdapterRegistry, AgentDescriptor, AgentRegistry
 from scc_brainai_bootstrap.registry.adapter import CapabilityResolver
 from scc_brainai_bootstrap.registry.descriptor import AgentState
@@ -64,13 +65,16 @@ def default_descriptors() -> List[AgentDescriptor]:
 
 
 def default_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
-    """Binder ``(fournisseur, capacité) → fabrique d'adaptateur``. Paramètres J1 inchangés (understanding/
-    specification/build en haiku ; conversation en sonnet ; plafond par appel 0,50 $, timeout 180)."""
+    """Binder ``(fournisseur, capacité) → fabrique d'adaptateur``. Understanding/specification/build en haiku ;
+    conversation en sonnet ; plafond par appel 0,50 $. Le **timeout** n'est plus le cutoff cognitif figé (180 s) :
+    c'est le **watchdog de sécurité gouverné** (``watchdog_config`` : défaut 3600 s / env / explicite) — un fusible
+    anti-zombie, jamais une limite de réflexion (RS-059 = vraie distinction activité/blocage à venir)."""
+    wd = load_call_watchdog().timeout_s
     return {
-        (CLAUDE_CODE, UNDERSTAND_NEED): lambda: ClaudeCodeUnderstandingAdapter(model="haiku", max_budget_usd=0.50, timeout=180),
-        (CLAUDE_CODE, SPECIFY): lambda: ClaudeCodeSpecificationAdapter(model="haiku", max_budget_usd=0.50, timeout=180),
-        (CLAUDE_CODE, BUILD_SOFTWARE): lambda: ClaudeCodeBuildAdapter(model="haiku", max_budget_usd=0.50, timeout=180),
-        (CLAUDE_CODE, CONVERSE): lambda: ClaudeCodeConversationAdapter(model="sonnet", max_budget_usd=0.50, timeout=180),
+        (CLAUDE_CODE, UNDERSTAND_NEED): lambda: ClaudeCodeUnderstandingAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
+        (CLAUDE_CODE, SPECIFY): lambda: ClaudeCodeSpecificationAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
+        (CLAUDE_CODE, BUILD_SOFTWARE): lambda: ClaudeCodeBuildAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
+        (CLAUDE_CODE, CONVERSE): lambda: ClaudeCodeConversationAdapter(model="sonnet", max_budget_usd=0.50, timeout=wd),
     }
 
 
@@ -166,9 +170,11 @@ def deferred_deploy_public_descriptor() -> AgentDescriptor:
 
 def delivery_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
     """Binder ``(fournisseur, capacité) → fabrique`` pour la livraison. Site en **haiku** par défaut (plafond par
-    appel 0,50 $ ; timeout 180) ; preview locale sans coût. Substituable : changer la fabrique substitue l'impl."""
+    appel 0,50 $ ; **watchdog de sécurité gouverné**, pas un cutoff cognitif) ; preview locale sans coût.
+    Substituable : changer la fabrique substitue l'impl."""
+    wd = load_call_watchdog().timeout_s          # watchdog de sécurité gouverné (défaut 3600 s), pas un cutoff cognitif
     return {
-        (CLAUDE_CODE, BUILD_SITE): lambda: ClaudeCodeSiteAdapter(model="haiku", max_budget_usd=0.50, timeout=180),
+        (CLAUDE_CODE, BUILD_SITE): lambda: ClaudeCodeSiteAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
         (LOCAL_LOOPBACK, PREVIEW_LOCAL): lambda: LocalPreviewAdapter(),
     }
 

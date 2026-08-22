@@ -29,7 +29,8 @@ from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extrac
 from scc_brainai_bootstrap.builder.provider_env import (
     AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
 from scc_brainai_bootstrap.builder.specification import SPEC_SCHEMA
-from scc_brainai_bootstrap.builder.tool_runner import run_confined
+from scc_brainai_bootstrap.builder.tool_runner import (
+    DEFAULT_WATCHDOG_S, SAFETY_WATCHDOG_EXCEEDED, run_confined)
 from scc_brainai_bootstrap.builder.workspace import Workspace
 from scc_brainai_bootstrap.core.clock import digest
 
@@ -146,7 +147,7 @@ def _failure_reason(envelope: Optional[Dict[str, Any]], exit_code: Any, timed_ou
             or envelope.get("is_error") or envelope.get("subtype") != "success"):
         return None
     if timed_out:
-        return "timeout"
+        return SAFETY_WATCHDOG_EXCEEDED   # PAS un timeout de cognition : fusible de dernier recours (arc + site)
     if envelope is None:
         return "enveloppe illisible"
     if nonzero_exit:
@@ -234,7 +235,7 @@ class ClaudeCodeBuildAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 120.0, claude_bin: str = "claude",
+                 timeout: float = DEFAULT_WATCHDOG_S, claude_bin: str = "claude",
                  auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
                  oauth_token: Optional[str] = None):
         self.model = model

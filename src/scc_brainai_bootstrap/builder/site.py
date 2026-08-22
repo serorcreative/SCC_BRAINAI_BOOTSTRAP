@@ -32,7 +32,7 @@ from scc_brainai_bootstrap.builder.build import _failure_reason, validate_spec_s
 from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
 from scc_brainai_bootstrap.builder.provider_env import (
     AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
-from scc_brainai_bootstrap.builder.tool_runner import run_confined
+from scc_brainai_bootstrap.builder.tool_runner import DEFAULT_WATCHDOG_S, run_confined
 from scc_brainai_bootstrap.builder.workspace import Workspace, WorkspaceError
 from scc_brainai_bootstrap.core.clock import digest
 
@@ -88,7 +88,7 @@ class ClaudeCodeSiteAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 180.0, claude_bin: str = "claude",
+                 timeout: float = DEFAULT_WATCHDOG_S, claude_bin: str = "claude",
                  auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
                  oauth_token: Optional[str] = None):
         self.model = model

@@ -184,7 +184,7 @@ def test_build_turn_failed_on_bad_readiness_or_unreadable():
     not_json = _mk_turn(envelope=_env("pas du JSON"))
     assert not_json["status"] == "failed" and not_json["error"] == "format tour invalide"
     timed = _mk_turn(envelope=None, timed_out=True)
-    assert timed["status"] == "failed" and timed["error"] == "timeout"
+    assert timed["status"] == "failed" and timed["error"] == "safety_watchdog_exceeded"
     err = _mk_turn(envelope=_env({"reply": "x", "readiness": "ready"}, ok=False))
     assert err["status"] == "failed" and err["error"] != "success"        # jamais "success"
 

@@ -35,7 +35,8 @@ from scc_brainai_bootstrap.builder.adapter_contract import AdapterContract, clau
 from scc_brainai_bootstrap.builder.cognitive_identity import CONDENSED_IDENTITY, compose_prompt
 from scc_brainai_bootstrap.builder.provider_env import (
     AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
-from scc_brainai_bootstrap.builder.tool_runner import run_confined
+from scc_brainai_bootstrap.builder.tool_runner import (
+    DEFAULT_WATCHDOG_S, SAFETY_WATCHDOG_EXCEEDED, run_confined)
 
 # Alias de compatibilité — NON publics (hors ``__all__``). Préservent les noms internes historiques
 # encore référencés (``understanding._redact``, ``understanding._DIAG_MAX``, …). Comportement identique.
@@ -115,11 +116,11 @@ def build_proposal(*, need: str, prompt: str, capability: str, adapter: str, mod
     diag = diagnostic(argv=argv, stdout=stdout, stderr=stderr, exit_code=exit_code,
                       timed_out=timed_out, envelope=envelope)
     nonzero_exit = exit_code is not None and exit_code != 0
-    # Échec d'appel : timeout / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
+    # Échec d'appel : watchdog de sécurité / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
     if (timed_out or envelope is None or nonzero_exit
             or envelope.get("is_error") or envelope.get("subtype") != "success"):
         if timed_out:
-            reason = "timeout"
+            reason = SAFETY_WATCHDOG_EXCEEDED   # PAS un timeout de cognition : fusible de dernier recours
         elif envelope is None:
             reason = "enveloppe illisible"
         elif nonzero_exit:
@@ -172,7 +173,7 @@ class ClaudeCodeUnderstandingAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 120.0, claude_bin: str = "claude",
+                 timeout: float = DEFAULT_WATCHDOG_S, claude_bin: str = "claude",
                  auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
                  oauth_token: Optional[str] = None):
         self.model = model
