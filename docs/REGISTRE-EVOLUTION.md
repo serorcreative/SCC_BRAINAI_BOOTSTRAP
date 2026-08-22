@@ -119,6 +119,15 @@ indissociables** : (1) **architecture canonique persistante** → RS-053 ; (2) *
 transversale/décision) → RS-017 ; (3) **arbitrage explicite** (Doctrine 14) → RS-022. **Aucune des trois n'est
 pleinement incarnée** aujourd'hui (socle de gouvernance + verticale de livraison réelle acquis ; moat différé).
 
+> ## ✅ JALON 3 — CLÔTURÉ DÉFINITIVEMENT (2026-08-22)
+> **Double revue croisée PASS** : **ClaudeS** (PASS + micro-correction, réserves A/B/C soldées) **+ Rose** (PASS,
+> aucune réserve) — bundle `docs/REVUE-ROSE-JALON-3.md`. **GO propriétaire final : Frédérique (2026-08-22).**
+> Rapport : `docs/CLOTURE-JALON-3.md` (+ addendum RS-056 levée). Suite déterministe **686 passed, 1 skipped**.
+> **J4 AUTORISÉ mais NON démarré.** Garde-fou de cadrage : **RS-060** — J4 traite **4 axes distincts** (RS-058
+> taille/latence/coût · RS-017 capitalisation/décision/transversal · RS-053 canonique indépendante du fournisseur ·
+> raccord du `LearningEngine` existant aux Pursuits produit). **RS-058 (fenêtrage/résumé) ≠ système d'apprentissage.**
+> *La passe produit post-clôture (mode UI, A4-2, watchdog, reprise) est hors périmètre du jalon J3 et déjà consignée.*
+
 | ID | Dette / découverte patrimoniale | Date | Origine (provenance réelle) | Statut | Destination |
 |---|---|---|---|---|---|
 | RS-051 | **Verrou des stores / écrivain unique** — les stores append-only (check-then-append **sans verrou**) deviennent un accès concurrent dès que le Build Runner asynchrone écrit des faits pendant une lecture/validation. **Doublement documentée au fondateur** : `BRAINAI-STATE-DEBRIEF-001` §9/§13 (« Concurrence JSONL : dette connue ») + `revue d'architecture` C4 (« verrouillage des stores — semaine 1 »). Écho SCC-INFRA : « Service Manager = autorité d'écriture unique ». **Non couverte** par une dette existante. | 2026-08-21 | `revue…` + `Débriefe`/STATE-DEBRIEF-001 | **`consignée` (créée)** | Durcissement stores (flock / écrivain unique) — **à jalonner** (lié RS-040) ; **ne pas implémenter en J3** |

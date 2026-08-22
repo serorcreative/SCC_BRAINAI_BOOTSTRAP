@@ -1,5 +1,12 @@
 # Rapport de clôture — JALON 3 : Adaptateurs / Canaux / Honnêteté + Doctrines (Phase B)
 
+> ## ✅ JALON 3 CLÔTURÉ DÉFINITIVEMENT — 2026-08-22
+> **Double revue croisée PASS** : **ClaudeS** (PASS avec micro-correction, réserves A/B/C soldées) **+ Rose**
+> (PASS, aucune réserve) — bundle `docs/REVUE-ROSE-JALON-3.md`. **GO propriétaire final : Frédérique.**
+> Suite **686 passed, 1 skipped** (J3 propre = 646+1 au `26770fd`). **J4 est AUTORISÉ mais NON démarré** — son
+> cadrage est protégé par **RS-060** (4 axes distincts : RS-058 contexte · RS-017 capitalisation/décision ·
+> RS-053 canonique · raccord `LearningEngine` ; **RS-058 ≠ système d'apprentissage**).
+
 *Plan Directeur v1.0 gelé, Constitution non retouchée, R0–R12, I1→I9. GO propriétaire Frédérique. Autonome (R5/R6).
 **CONNECTER, PAS RECONSTRUIRE.** Le Parcours Client 1 est resté **vert en permanence**.*
 
