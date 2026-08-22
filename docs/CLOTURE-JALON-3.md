@@ -91,7 +91,8 @@ chaîne réelle aujourd'hui. **Décision (conforme à la consigne) : ne PAS gén
 propre initiative** — aucun 2e executor n'est à brancher. La frontière est **verrouillée par 2 tests déterministes de
 caractérisation** (l'adaptateur émet le défaut Claude ; aucun adaptateur n'expose `token_var`) et **consignée en
 RS-057**. *C'est le solde honnête de A : le pattern est générique au niveau fonction, la traversée adaptateur est une
-dette différée assumée, pas une capacité revendiquée.*
+frontière assumée, différée (RS-057) — à câbler uniquement à l'admission d'un second executor réel ; le périmètre
+actuel est complet sans elle.*
 
 **B — Portée exacte de l'isolation HOME (correction de survente).** L'isolation de HOME **supprime la découverte
 conventionnelle** des surfaces situées sous le HOME réel (le fournisseur ne *trouve* plus `~/.claude.json` via
