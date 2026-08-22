@@ -111,8 +111,9 @@ l'admission d'un **second executor**. Consigné comme tel dans RS-056.
   `accountUuid`, `userID`, `machineID`, `USER`, `LOGNAME`, `HOME`).
 - **Contrôle positif B1** : **4/11 chaînes détectées** (`HOME`, `LOGNAME`, `USER`, **`emailAddress`**) → **la fuite est
   empiriquement prouvée** et **le protocole sait la détecter** (validé).
-- **Cible** : **NON EXÉCUTÉE / DIFFÉRÉE** (jeton non provisionnable de façon autonome — `setup-token` interactif,
-  `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` absents ; RS-056, option propriétaire B).
+- **Cible** *(état à la clôture 21/08)* : **NON EXÉCUTÉE / DIFFÉRÉE** (jeton non provisionnable de façon autonome —
+  `setup-token` interactif, `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` absents ; RS-056, option propriétaire B).
+  **→ [Mise à jour 2026-08-22 : RS-056 LEVÉE, sonde cible exécutée, VERDICT PASS bornée — voir Addendum en fin de rapport.]**
 - **AM1** : sorties brutes écrites **hors dépôt puis supprimées** ; **aucune valeur** d'identité, de token ni d'email
   dans le dépôt (scan vérifié : seuls des `@example.test` factices).
 
@@ -124,9 +125,10 @@ l'admission d'un **second executor**. Consigné comme tel dans RS-056.
 - **PROUVÉ** : (a) la fuite d'identité existe sous B1 (email + USER/LOGNAME/HOME restitués par le modèle) ; (b) le
   protocole de sonde **sait détecter** la fuite ; (c) le **mécanisme** de mitigation (bascule token + HOME isolé) est
   **livré et déclaré**.
-- **NON PROUVÉ (limite explicite)** : la **non-attribution** de la surface d'identité **sous le dispositif cible**
-  (HOME isolé + jeton) — la sonde cible n'a **pas** été exécutée (jeton non provisionnable). **Aucune survente** :
-  on n'affirme **pas** « aucune fuite possible » ; l'étanchéité cible reste **à prouver** (RS-056).
+- **NON PROUVÉ à la clôture (21/08), désormais PROUVÉ bornée (22/08)** : la **non-attribution** de la surface
+  d'identité **sous le dispositif cible** (HOME isolé + jeton) n'avait **pas** été exécutée au 21/08. **→ [Mise à jour
+  2026-08-22 : sonde cible exécutée → cible 0/11, VERDICT PASS ; RS-056 levée. Portée strictement bornée — voir
+  Addendum.]** **Aucune survente maintenue** : on n'affirme **pas** « aucune fuite possible » ni un scellement FS.
 - **A1 résiduel (rappel)** : une écriture en chemin absolu hors workspace reste invisible à la collecte (RS-046) ;
   plafond USD best-effort (RS-039).
 
@@ -158,17 +160,19 @@ l'admission d'un **second executor**. Consigné comme tel dans RS-056.
 | I9 BrainAI détient l'intention | **renforcé** | contrat borne la mission ; historique **scopé Pursuit** (jamais la Pursuit entière) |
 
 ## RS-2 — re-statuées / créées / levées
-- **RS-030** `résolue partielle(J3)` (fuite prouvée B1 + mécanisme livré ; **portée précisée** correctif `6b14247` :
-  isolation HOME = **suppression de la découverte conventionnelle** sous le HOME réel — **pas un scellement FS**, accès
-  par chemin absolu non empêché (cf. RS-046 / RS-040) ; `token_var` injectable **au niveau fonction seulement**
-  (RS-057) ; Claude = 1re instanciation ; cible différée **RS-056**).
+- **RS-030** `résolue (bornée, preuve cible PASS 2026-08-22)` (fuite prouvée B1 + mécanisme livré + **preuve cible
+  acquise** : sonde cible 0/11 → PASS bornée, cf. Addendum ; **portée précisée** correctif `6b14247` : isolation HOME =
+  **suppression de la découverte conventionnelle** sous le HOME réel — **pas un scellement FS**, accès par chemin absolu
+  non empêché (cf. RS-046 / RS-040) ; `token_var` injectable **au niveau fonction seulement** (RS-057) ; Claude = 1re
+  et seule instanciation testée).
 - **RS-039** `résolue partielle(J3)` (intégrée au contrat : `usd_cap=aggregate_stop`, jamais « hard »).
 - **RS-047** `résolue(J3)` (budget gouverné). **RS-024** `résolue partielle(J3)` (README 12→21, 197→~660).
 - **RS-011** `archivée honnêtement(D1)` · **RS-010** `archivée(D2)` · **RS-023** `étiquetée(D3)`.
 - **RS-012** `absorbée (table produite, D4)` · **RS-015** `doctrine écrite(J3)`.
 - **RS-049** (échelle PREUVE-B) reste `consignée` ; **RS-050** `levée` (chartes OCOS sourcées).
-- **RS-056** (provisionnement jeton cible) **précisée (revue ClaudeS/C)** : **prérequis d'exploitation** (acte humain
-  propriétaire), **pas dette d'ingénierie** ; conditionne la preuve cible **et** l'admission d'un 2e executor.
+- **RS-056** (provisionnement jeton cible) **`levée` (2026-08-22)** : jeton provisionné (acte propriétaire, non
+  persistant) → **sonde cible PASS bornée** (cible 0/11, coût réel 0,042207 $ ; cf. Addendum). Était un **prérequis
+  d'exploitation**, pas une dette d'ingénierie.
 - **Créées** : **RS-051** (verrou stores), **RS-053** (architecture canonique/MOAT #6), **RS-054** (objet Version +
   boucle modification), **RS-055** (alerte sécurité modèle), **RS-056** (provisionnement jeton cible), **RS-057**
   (injectabilité `token_var` non traversante au niveau adaptateur — frontière assumée, revue ClaudeS/A). **RS-052 non
@@ -194,16 +198,52 @@ défaut gouverné** (bascule prête ; B1 reste défaut jusqu'au PASS cible) · �
 `brainai-human`/UI Tauri traités (D1/D2) · ✅ scaffolds étiquetés (D3) · ✅ OWNER MODE / OCOS / multi-tenant
 **documentés** · ✅ Parcours 1 vert · ✅ legacy intact · ✅ I1→I9 préservés · ✅ rapport autonome remis.
 
-**Limites explicites non levées (aucune survente)** :
-- **Preuve d'étanchéité du dispositif cible** (RS-056) — **prérequis d'exploitation** : elle exige un **acte
-  propriétaire** de provisionnement du jeton (pas un travail d'ingénierie). B1 reste **défaut** (RS-4) tant que la
-  cible n'a pas PASS.
-- **Portée de l'isolation HOME** — elle **supprime la découverte conventionnelle** sous le HOME réel, mais **n'est pas
-  un scellement du système de fichiers** : un accès par **chemin absolu** connu n'est pas empêché (RS-046 R1 / RS-040,
-  confinement OS non livré).
+**Limites explicites (aucune survente)** :
+- **Preuve d'étanchéité du dispositif cible** (RS-056) — était un **prérequis d'exploitation** (acte propriétaire de
+  provisionnement du jeton). **→ LEVÉE le 2026-08-22** : sonde cible exécutée, **VERDICT PASS bornée** (voir Addendum).
+  B1 reste néanmoins le **défaut opérationnel** du parcours produit tant que le jeton cible n'est pas fourni au runtime
+  (activation = étape d'exploitation ultérieure, non J3).
+- **Portée de l'isolation HOME** *(inchangée par le PASS)* — elle **supprime la découverte conventionnelle** sous le
+  HOME réel, mais **n'est pas un scellement du système de fichiers** : un accès par **chemin absolu** connu n'est pas
+  empêché (RS-046 R1 / RS-040, confinement OS non livré). Le PASS cible **ne relève pas** cette limite.
 - **Traversée `token_var`** — injectable **au niveau des fonctions `provider_env`**, **pas** au niveau adaptateur
   (RS-057) : un 2e executor exigera le câblage adaptateur + son loader/runner de sonde. **Aucun executor tiers n'est
-  déclaré compatible ni testé** à ce stade.
+  déclaré compatible ni testé** à ce stade — le PASS ne concerne que **l'instanciation Claude Code testée**.
+
+---
+
+## Addendum post-clôture — 2026-08-22 : RS-056 levée, preuve d'étanchéité cible acquise (PASS bornée)
+*J3 reste officiellement clos au commit `26770fd` ; cet addendum consigne le **résultat de la condition de suite
+RS-056** (prérequis d'exploitation), sans rouvrir les acquis techniques de J3. Il enregistre un fait daté, il ne
+réécrit pas le récit de clôture (les mentions « cible différée » ci-dessus étaient exactes au 21/08).*
+
+**Acte propriétaire.** La propriétaire a provisionné le jeton d'auth cible (`claude setup-token`, Terminal séparé,
+interactif). Chargement en variable `CLAUDE_CODE_OAUTH_TOKEN` par saisie silencieuse (`read -rs`), **non persistant**,
+`unset` **vérifié** après exécution. **Valeur jamais transmise, jamais affichée, jamais écrite au dépôt** (AM1).
+
+**Sonde cible exécutée (1 seul appel réel, reliquat D5).** HOME isolé + jeton explicite, modèle `haiku`, même surface
+et même protocole (`PROBE_PROMPT` gelé) que le contrôle positif :
+| Élément | Valeur (comptages seuls) |
+|---|---|
+| Contrôle positif (hérité J3 B1) | **4/11** détecté (protocole prouvé capable — AM2) |
+| **Cible** (HOME isolé + jeton) | **0/11** détecté, `champs=[]` |
+| Appel cible | `exit=0`, `timeout=False`, réponse non vide ⇒ **appel valide** |
+| Coût réel | **0,042207 $** (`kind=real`) |
+| **VERDICT** | **PASS** |
+
+**Budget D5.** Cumul réel J3 + cette sonde : **2 appels comptés D5** (B1 0,045522 $ + cible 0,042207 $ ≈ **0,0877 $**),
+sous le plafond (≤ 3 appels / ≤ 0,50 $). L'appel `config list` non intentionnel reste déclaré **hors D5**.
+
+**Ce que ce PASS démontre — et ses limites (aucune survente).**
+- ✅ **Démontré** : sous le dispositif cible (HOME isolé + jeton explicite), la surface d'identité **énumérée** n'est
+  **plus attribuée** dans la réponse du modèle — **pour l'instanciation Claude Code testée**, avec un protocole dont le
+  contrôle positif prouve qu'il **sait** détecter la fuite.
+- ⛔ **Non démontré / hors portée du PASS** : (a) ce n'est **pas** un scellement du système de fichiers — un accès par
+  **chemin absolu** reste possible (RS-046/RS-040) ; (b) **aucune** compatibilité d'un **autre executor** (RS-057,
+  `token_var` non câblé au niveau adaptateur) ; (c) l'**activation** du mode cible dans le **parcours produit** (jeton
+  fourni au runtime) est une **étape d'exploitation ultérieure**, non réalisée ici — B1 reste le défaut opérationnel.
+
+**RS-2.** RS-056 **`levée`** ; RS-030 **`résolue (bornée, preuve cible PASS)`**. RS-057 et RS-046/RS-040 **inchangées**.
 
 ---
 *STOP après clôture. **AUCUN J4** sans revue croisée Rose + ClaudeS **et** GO explicite de Frédérique.
