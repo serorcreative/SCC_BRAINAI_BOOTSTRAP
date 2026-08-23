@@ -1,0 +1,197 @@
+{
+  "data_dir": "/Users/Fred/1A SEROR CREATIVE/SERORCREATIVE SynologyDrive/SynologyDrive/01_CCSC/17_BRAINAI_BOOTSTRAP/data",
+  "data_dir_exists": true,
+  "kind": "runtime_baseline",
+  "lot": "L0-F",
+  "non_jsonl_files": [
+    "data/session.json"
+  ],
+  "note": "Lecture seule ; aucune valeur/contenu exposé ; ids de Pursuit hachés.",
+  "store_count": 9,
+  "stores": [
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/cognition/decision/decisions.jsonl",
+      "records": 7,
+      "schema_keys_first_record": [
+        "as_of",
+        "execution_manifest",
+        "explanation",
+        "failure_criteria",
+        "id",
+        "options",
+        "provider",
+        "qualification",
+        "rationale",
+        "request",
+        "revocation_conditions",
+        "selected_id",
+        "status",
+        "success_criteria",
+        "traceability",
+        "validation",
+        "validation_conditions"
+      ],
+      "sha256": "7b9ddb9c67e02a658478cb59cb71cf508a9ffa77975a3ccdafb70887fba5ac2e",
+      "size_bytes": 39932
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/cognition/execution/executions.jsonl",
+      "records": 1,
+      "schema_keys_first_record": [
+        "as_of",
+        "authorization",
+        "decision_id",
+        "events",
+        "guards",
+        "id",
+        "provider",
+        "report",
+        "request",
+        "status",
+        "steps",
+        "subject",
+        "traces_for_memory"
+      ],
+      "sha256": "43741326d86d2c8e3d0afcfa8436450762d0554b4d8e00f2c628990df8b16b5e",
+      "size_bytes": 4340
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/cognition/reasoning/deliberations.jsonl",
+      "records": 9,
+      "schema_keys_first_record": [
+        "arbitration",
+        "as_of",
+        "constraints",
+        "decision",
+        "decomposition",
+        "explanation",
+        "facts",
+        "hypotheses",
+        "id",
+        "inferences",
+        "options",
+        "problem",
+        "provider",
+        "risks"
+      ],
+      "sha256": "8004c96dd6c54485bef943593685abf0ea0e2ac4c950060bcba545bc1e42d24a",
+      "size_bytes": 71479
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/dossier_links.jsonl",
+      "records": 4,
+      "schema_keys_first_record": [
+        "attached_as_of",
+        "attached_by",
+        "dossier_id",
+        "input_id",
+        "kind",
+        "link_id"
+      ],
+      "sha256": "032524340dce04909699d1794b972684f6b469a2bc9f4ab0ebe6d9bcc024f94a",
+      "size_bytes": 772
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/dossiers.jsonl",
+      "records": 2,
+      "schema_keys_first_record": [
+        "correlation_key",
+        "dossier_id",
+        "label",
+        "opened_as_of",
+        "opened_by",
+        "request_id",
+        "seed",
+        "status"
+      ],
+      "sha256": "e182d4850a97f6fcfecd0cfbbdaaad945ec36169bb480e8bf1f16d3253f20242",
+      "size_bytes": 499
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/events.jsonl",
+      "records": 2,
+      "schema_keys_first_record": [
+        "actor",
+        "payload",
+        "seq",
+        "timestamp",
+        "topic"
+      ],
+      "sha256": "d2103831ec6528fefc15a2a8f2ced97f976659f083d35145cd65551ecd8709ee",
+      "size_bytes": 349
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/inputs.jsonl",
+      "records": 6,
+      "schema_keys_first_record": [
+        "actor",
+        "as_of",
+        "content",
+        "context",
+        "fidelity",
+        "id",
+        "ingested_at",
+        "integrity",
+        "modality",
+        "observed_at",
+        "provenance",
+        "session_id"
+      ],
+      "sha256": "4b771be5d8e256249dc6dc23805c1ada9501325a3e1968c5e9ed555d75526d5a",
+      "size_bytes": 2412
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/memory/brain_memory.jsonl",
+      "records": 76,
+      "schema_keys_first_record": [
+        "actor",
+        "data",
+        "hash",
+        "id",
+        "kind",
+        "prev_hash",
+        "redacted",
+        "session_id",
+        "subtype",
+        "tags",
+        "timestamp"
+      ],
+      "sha256": "815d5eee777f056cf07b12042027e40ddfe779a6751877141fb58e62e856a644",
+      "size_bytes": 35333
+    },
+    {
+      "distinct_pursuits": 0,
+      "parse_errors": 0,
+      "path_rel_core": "data/memory/brain_sessions.jsonl",
+      "records": 19,
+      "schema_keys_first_record": [
+        "actor",
+        "entry_ids",
+        "id",
+        "meta",
+        "started_at",
+        "status",
+        "summary",
+        "updated_at"
+      ],
+      "sha256": "5b9c5331ace8a481ae2c6477358489212f66fc374611d1ad7533c59d7923afaa",
+      "size_bytes": 6175
+    }
+  ]
+}
