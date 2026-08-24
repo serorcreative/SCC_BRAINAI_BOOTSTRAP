@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 140
+- **Entrées totales** : 141
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -20,14 +20,15 @@
 | doctrine | 30 |
 | evolution_record | 60 |
 | invariant | 5 |
+| milestone | 1 |
 | ratification | 1 |
 
 ## Catégories de preuve utilisées (calculé)
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 127 |
-| artifact_evidence | 3 |
+| source_evidence | 128 |
+| artifact_evidence | 4 |
 | test_evidence | 0 |
 | runtime_evidence | 0 |
 
@@ -104,6 +105,7 @@
 | `INV-PROVIDER-INTERCHANGEABLE` | invariant | Les LLM sont des ressources cognitives interchangeables ; jamais le siège de l'identité… | actif | — | — | src |
 | `INV-SOUVERAINETE` | invariant | Souveraineté humaine finale (Frédérique) : l'appréciation de BrainAI ne déclenche jamai… | actif | — | — | src |
 | `INV-T3` | invariant | Règle T3 immuable : toute action critique/irréversible/sortante exige validation humain… | actif | — | — | src |
+| `MILESTONE-L0-PROVISIONAL-CLOSURE-2026-08-24` | milestone | L0 — clôture provisoire du lot intégrité / source de vérité | provisionally_closed | — | — | artifact |
 | `RATIF-2026-08-24` | ratification | Ratification propriétaire — Réunification canonique BrainAI (Frédérique, 2026-08-24) | ratifiée | — | — | artifact |
 | `RS-001` | evolution_record | events.jsonl non append-only (EventRecorder.dump→write_text tronquait à chaque processus) | résolue(7c065a5) | o | — | src |
 | `RS-002` | evolution_record | Collision proposal_id (id indépendant du contenu du Brief) | résolue (déjà corrigé avant J0 : proposals.py inclut brief) | o | — | src |
