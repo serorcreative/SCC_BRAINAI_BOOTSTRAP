@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "BrainAI Canonical Registry — entry schema v0 (L0-D, révisé post-ratification 2026-08-24)",
+  "description": "Entrée append-only. Un nom de module ne prouve JAMAIS une capacité. Les preuves sont différenciées (source/artifact/test/runtime) et jamais sur-promues : un SHA-256 documentaire est artifact_evidence, jamais runtime_evidence. L'origine analytique d'une décision est distincte de sa ratification propriétaire.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "title", "status", "source_paths", "provenance", "created_at"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_.-]+$", "description": "identifiant stable et unique"},
+    "kind": {
+      "type": "string",
+      "enum": [
+        "invariant", "decision_owner", "ratification", "doctrine", "adr",
+        "component", "capability", "repo", "audit", "amendment",
+        "evolution_record", "migration", "milestone", "runtime_evidence"
+      ]
+    },
+    "title": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "minLength": 1},
+    "source_paths": {"type": "array", "items": {"type": "string"}},
+    "provenance": {"type": "string", "minLength": 1},
+    "origin": {"type": ["string", "null"], "description": "origine analytique/convergence (distincte de la ratification propriétaire)"},
+    "ratification": {"type": ["string", "null"], "description": "référence de l'acte de ratification propriétaire (ex. RATIF-2026-08-24 pt.N)"},
+    "git_repo": {"type": ["string", "null"]},
+    "git_commit": {"type": ["string", "null"]},
+    "doctrine_refs": {"type": "array", "items": {"type": "string"}},
+    "test_refs": {"type": "array", "items": {"type": "string"}},
+    "dependencies": {"type": "array", "items": {"type": "string"}},
+    "supersedes": {"type": ["string", "null"]},
+    "superseded_by": {"type": ["string", "null"]},
+    "migration_state": {
+      "type": ["string", "null"],
+      "enum": [null, "conserver", "connecter", "adapter", "migrer", "fusionner", "reecrire_partiel", "doctrine", "banc_patrimoine", "archiver", "ignorer", "ne_jamais_rebrancher", "n_a"]
+    },
+    "lifecycle": {
+      "type": ["string", "null"],
+      "enum": [null, "code", "teste", "raccorde", "exerce_reellement", "dormant", "legacy", "prototype", "conceptuel", "n_a"]
+    },
+    "source_evidence": {"type": ["string", "null"], "description": "la source existe (chemin@commit) — preuve la plus faible"},
+    "artifact_evidence": {"type": ["string", "null"], "description": "artefact documentaire hashé (ex. sha256=...) — PAS une preuve d'exécution"},
+    "test_evidence": {"type": ["string", "null"], "description": "résultat de test réel ; renseigné seulement si prouvé"},
+    "runtime_evidence": {"type": ["string", "null"], "description": "preuve d'exercice runtime réel de la capacité revendiquée ; JAMAIS un hash documentaire"},
+    "original_status": {"type": ["string", "null"], "description": "statut d'origine préservé depuis la source (ex. RS)"},
+    "destination": {"type": ["string", "null"], "description": "destination d'origine préservée depuis la source (ex. RS)"},
+    "known_limits": {"type": ["string", "null"]},
+    "created_at": {"type": "string"},
+    "verified_at": {"type": ["string", "null"]}
+  }
+}
