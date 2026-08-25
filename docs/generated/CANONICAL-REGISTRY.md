@@ -7,14 +7,14 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 141
+- **Entrées totales** : 142
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
 |---|---|
 | adr | 8 |
 | amendment | 1 |
-| audit | 4 |
+| audit | 5 |
 | component | 21 |
 | decision_owner | 10 |
 | doctrine | 30 |
@@ -27,8 +27,8 @@
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 128 |
-| artifact_evidence | 4 |
+| source_evidence | 129 |
+| artifact_evidence | 5 |
 | test_evidence | 0 |
 | runtime_evidence | 0 |
 
@@ -69,6 +69,7 @@
 | `AUDIT-CLAUDEC-REGISTRE` | audit | Registre de couverture patrimoniale (ClaudeC) | present | — | — | artifact |
 | `AUDIT-CLAUDES-RAPPORT` | audit | Rapport patrimonial ClaudeS | pending_absent | — | — | — |
 | `AUDIT-CLAUDES-REGISTRE` | audit | Registre de couverture ClaudeS | pending_absent | — | — | — |
+| `AUDIT-HUMAN-FIXTURE-REVIEW-2026-08-25` | audit | Revue humaine ciblée des fixtures de test (faux secrets potentiels) — PASS borné | human_fixture_review_pass_scoped | o | — | artifact |
 | `COMP-00_SYSTEM_FOUNDATION` | component | foundation — Fondation universelle (SccObject/contrats/primitives) | actif-socle-non-adopte | — | — | src |
 | `COMP-00_SYSTEM_ORCHESTRATOR` | component | orchestrator — Orchestrateur socle 5 moteurs (E2E) | actif-hors-produit | — | — | src |
 | `COMP-01_INGESTION` | component | 01_INGESTION — Ingestion — lecteurs d'exports locaux | prototype-lecteur | — | — | src |
