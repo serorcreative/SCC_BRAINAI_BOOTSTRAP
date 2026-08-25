@@ -1,11 +1,15 @@
-name: L0-E — CI non-régression Core BrainAI
+name: L0-E — CI non-régression Core BrainAI (topologie 01_CCSC, Option A)
 
 on:
   push:
   pull_request:
 
 permissions:
-  contents: read          # aucun secret, aucune écriture
+  contents: read          # dépôts PUBLICS ; aucun secret, aucun PAT, aucune écriture
+
+defaults:
+  run:
+    working-directory: 01_CCSC/17_BRAINAI_BOOTSTRAP
 
 jobs:
   core-non-regression:
@@ -16,8 +20,84 @@ jobs:
       # BRAINAI_JALON_LLM défini mais vide → test_real_claude_brief s'auto-skippe (0 appel LLM).
       BRAINAI_JALON_LLM: ""
     steps:
-      - name: Checkout
+      # --- Core : repo courant, commit déclencheur (push) ou merge-ref (PR). NON piné. ---
+      - name: Checkout Core (17_BRAINAI_BOOTSTRAP — candidat courant)
         uses: actions/checkout@v4
+        with:
+          path: 01_CCSC/17_BRAINAI_BOOTSTRAP
+          persist-credentials: false
+
+      # --- Frères aux SHA COMPLETS figés (dépôts publics, aucune branche flottante) ---
+      - name: Checkout 00_SYSTEM (SCC_SYSTEM @ da87aee)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_SYSTEM
+          ref: da87aee587aad18e3f37e5279c3e4653d72229c7
+          path: 01_CCSC/00_SYSTEM
+          persist-credentials: false
+      - name: Checkout 04_KNOWLEDGE (SCC_KNOWLEDGE @ 6fdea07)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_KNOWLEDGE
+          ref: 6fdea077e48ec908d5e0f6cdaddd213d8af4f234
+          path: 01_CCSC/04_KNOWLEDGE
+          persist-credentials: false
+      - name: Checkout 09_CONTROL_PLANE (SCC_CONTROL_PLANE @ 0706e40)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_CONTROL_PLANE
+          ref: 0706e408bcbf18a7a18e922715ecdc80416b20c9
+          path: 01_CCSC/09_CONTROL_PLANE
+          persist-credentials: false
+      - name: Checkout 10_BRAINAI (SCC_BRAINAI_KERNEL @ 240e163)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_BRAINAI_KERNEL
+          ref: 240e163c867fae7c48c52809db81b103f0fc0716
+          path: 01_CCSC/10_BRAINAI
+          persist-credentials: false
+      - name: Checkout 11_BRAINAI_MEMORY (SCC_BRAINAI_MEMORY @ 4e1efbc)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_BRAINAI_MEMORY
+          ref: 4e1efbcc06c8e1bb164c3f756336297d4db73a51
+          path: 01_CCSC/11_BRAINAI_MEMORY
+          persist-credentials: false
+      - name: Checkout 12_BRAINAI_LEARNING (SCC_BRAINAI_LEARNING @ ebf0090)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_BRAINAI_LEARNING
+          ref: ebf00903d82c388c0f7effd480bde51a56852067
+          path: 01_CCSC/12_BRAINAI_LEARNING
+          persist-credentials: false
+      - name: Checkout 13_BRAINAI_REASONING (SCC_BRAINAI_REASONING @ 3860ac1)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_BRAINAI_REASONING
+          ref: 3860ac15cadef0ea35147ecab381423f937e7571
+          path: 01_CCSC/13_BRAINAI_REASONING
+          persist-credentials: false
+      - name: Checkout 14_BRAINAI_PLANNING (SCC_BRAINAI_PLANNING @ e9cdeae)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_BRAINAI_PLANNING
+          ref: e9cdeae4a514456c001395ea3d83aa9ae639ca9d
+          path: 01_CCSC/14_BRAINAI_PLANNING
+          persist-credentials: false
+      - name: Checkout 15_BRAINAI_DECISION (SCC_BRAINAI_DECISION @ fd5fcda)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_BRAINAI_DECISION
+          ref: fd5fcda218ba22103f612532b879df96bc035f2c
+          path: 01_CCSC/15_BRAINAI_DECISION
+          persist-credentials: false
+      - name: Checkout 16_BRAINAI_EXECUTION (SCC_BRAINAI_EXECUTION @ 93437f3)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_BRAINAI_EXECUTION
+          ref: 93437f33ffd19af6a99d829fb79f5f879b40a3ec
+          path: 01_CCSC/16_BRAINAI_EXECUTION
+          persist-credentials: false
 
       - name: Python 3.9 (requires-python >= 3.9 ; runtime de la baseline L0-E)
         uses: actions/setup-python@v5
@@ -26,6 +106,39 @@ jobs:
 
       - name: Installer pytest (Core = stdlib pur, dependencies=[])
         run: python -m pip install "pytest==8.4.2"
+
+      # --- Vérification topologie + SHAs figés des frères AVANT pytest (fail-closed) ---
+      - name: Vérifier topologie 01_CCSC et SHAs figés des frères
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -u
+          W="$GITHUB_WORKSPACE/01_CCSC"
+          fail=0
+          check() {  # $1=dir  $2=sha_attendu
+            if [ ! -d "$W/$1" ]; then echo "$1 : MISSING dir => FAIL"; fail=1; return; fi
+            got=$(git -C "$W/$1" rev-parse HEAD 2>/dev/null); rc=$?
+            if [ $rc -ne 0 ]; then echo "$1 : rev-parse ERROR(rc=$rc) => FAIL"; fail=1; return; fi
+            if [ "$got" != "$2" ]; then echo "$1 : SHA=$got attendu=$2 => FAIL"; fail=1;
+            else echo "$1 : SHA=$got => PASS"; fi
+          }
+          check 00_SYSTEM       da87aee587aad18e3f37e5279c3e4653d72229c7
+          check 04_KNOWLEDGE    6fdea077e48ec908d5e0f6cdaddd213d8af4f234
+          check 09_CONTROL_PLANE 0706e408bcbf18a7a18e922715ecdc80416b20c9
+          check 10_BRAINAI      240e163c867fae7c48c52809db81b103f0fc0716
+          check 11_BRAINAI_MEMORY 4e1efbcc06c8e1bb164c3f756336297d4db73a51
+          check 12_BRAINAI_LEARNING ebf00903d82c388c0f7effd480bde51a56852067
+          check 13_BRAINAI_REASONING 3860ac15cadef0ea35147ecab381423f937e7571
+          check 14_BRAINAI_PLANNING e9cdeae4a514456c001395ea3d83aa9ae639ca9d
+          check 15_BRAINAI_DECISION fd5fcda218ba22103f612532b879df96bc035f2c
+          check 16_BRAINAI_EXECUTION 93437f33ffd19af6a99d829fb79f5f879b40a3ec
+          # dossiers requis par la résolution config.py (aucun pin sur le Core)
+          [ -d "$W/00_SYSTEM/agents" ] && echo "00_SYSTEM/agents : PASS" || { echo "00_SYSTEM/agents : MISSING => FAIL"; fail=1; }
+          [ -d "$W/17_BRAINAI_BOOTSTRAP" ] && echo "17_BRAINAI_BOOTSTRAP : présent (Core, NON piné)" || { echo "Core : MISSING => FAIL"; fail=1; }
+          for d in 04_KNOWLEDGE 09_CONTROL_PLANE 10_BRAINAI 11_BRAINAI_MEMORY 12_BRAINAI_LEARNING 13_BRAINAI_REASONING 14_BRAINAI_PLANNING 15_BRAINAI_DECISION 16_BRAINAI_EXECUTION; do
+            [ -d "$W/$d/src" ] || { echo "$d/src : MISSING => FAIL"; fail=1; }
+          done
+          [ $fail -eq 0 ] || { echo "TOPOLOGY = FAIL"; exit 1; }
+          echo "TOPOLOGY = PASS"
 
       - name: Suite déterministe (0 LLM ; billable auto-skippé)
         run: python -m pytest -p no:cacheprovider
