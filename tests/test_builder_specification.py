@@ -316,7 +316,7 @@ def test_invalid_json_result_is_failure():
 
 def test_timeout_is_failure_without_crash():
     fact = _spec(None, timed_out=True)
-    assert fact["status"] == "failed" and fact["error"] == "timeout"
+    assert fact["status"] == "failed" and fact["error"] == "safety_watchdog_exceeded"
     assert fact["cost"]["kind"] == "unavailable" and fact["diagnostic"]["timed_out"] is True
 
 

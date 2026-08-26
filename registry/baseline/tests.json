@@ -1,0 +1,47 @@
+{
+  "branch": "reunification/l0-integrity",
+  "command": ".venv/bin/python -m pytest -p no:cacheprovider (BRAINAI_JALON_LLM unset)",
+  "core_commit": "8e8979ddcbae877dc7adb0311d226c42b42ac698",
+  "core_commit_short": "8e8979d",
+  "date": "2026-08-24",
+  "exclusion_reason": "gate BRAINAI_JALON_LLM absent -> appel LLM facturable non active",
+  "framework": "pytest",
+  "known_limits": "'test passe' != 'capacite exercee en runtime reel' : cette baseline prouve la non-regression deterministe, pas l'exercice LLM reel (Etage 2, hors perimetre 0 euro). Snapshot date (duree variable) : non byte-reproductible ; la CI ne le regenere pas.",
+  "lot": "L0-E",
+  "other_statuses_available": {
+    "xfailed": "not_distinguishable_from_junit_suite_attributes",
+    "xpassed": "not_distinguishable_from_junit_suite_attributes"
+  },
+  "proof_data_unchanged": {
+    "method": "empreintes sha256 de data/ avant/apres identiques + garde conftest _guard_real_data_dir_unchanged",
+    "observed": true
+  },
+  "proof_git_unchanged": {
+    "method": "arbre Git compare avant/apres le run (aucun fichier cree/modifie par la suite)",
+    "observed": true
+  },
+  "proof_no_llm": {
+    "claim": "aucun test LLM/provider volontairement active pendant cette execution",
+    "excluded_test": "test_real_claude_brief",
+    "exclusion_mechanism": "pytest skipif (apparait dans skipped)",
+    "limitation": "ne constitue PAS une preuve universelle d'impossibilite reseau du code",
+    "llm_gate": "BRAINAI_JALON_LLM unset",
+    "other_boundaries": "tests builder : run_confined piege par monkeypatch ; subprocess locaux ; loopback local",
+    "scope": "this_baseline_execution"
+  },
+  "provenance": "attributs <testsuite> du JUnit-XML du runner reel (parses) + metadonnees explicites (argv[2])",
+  "results": {
+    "duration_s": 16.78,
+    "errors": 0,
+    "failed": 0,
+    "passed": 686,
+    "skipped": 1,
+    "tests": 687
+  },
+  "runtime": {
+    "pytest_version": "8.4.2",
+    "python_version": "3.9.6"
+  },
+  "scope_excluded": "test_real_claude_brief (test_builder_understanding.py) — appel LLM facturable",
+  "scope_included": "tests/ (suite deterministe locale : stdlib pur ; subprocess LOCAUX ; loopback 127.0.0.1 ; frontieres externes piegees par monkeypatch)"
+}

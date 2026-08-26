@@ -129,7 +129,7 @@ def test_brain_error_envelope_is_failure():
 
 def test_timeout_is_failure_without_crash():
     fact = _proposal(None, timed_out=True)
-    assert fact["status"] == "failed" and fact["error"] == "timeout" and fact["cost"]["kind"] == "unavailable"
+    assert fact["status"] == "failed" and fact["error"] == "safety_watchdog_exceeded" and fact["cost"]["kind"] == "unavailable"
 
 
 def test_unreadable_envelope_is_failure():

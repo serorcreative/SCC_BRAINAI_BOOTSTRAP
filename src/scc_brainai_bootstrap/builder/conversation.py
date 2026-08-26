@@ -22,8 +22,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
+from scc_brainai_bootstrap.builder.adapter_contract import AdapterContract, claude_text_contract
 from scc_brainai_bootstrap.builder.cognitive_identity import COGNITIVE_IDENTITY, compose_prompt
-from scc_brainai_bootstrap.builder.tool_runner import run_confined
+from scc_brainai_bootstrap.builder.provider_env import (
+    AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
+from scc_brainai_bootstrap.builder.tool_runner import (
+    DEFAULT_WATCHDOG_S, SAFETY_WATCHDOG_EXCEEDED, run_confined)
 
 # Provenance épistémique d'un élément (EPISTEMIC-PROVENANCE, J1) — valeurs **émises par le modèle**. « vérifié »
 # est **absent** de cette liste : il est **structurellement inémettable** par le modèle et réservé à une
@@ -264,11 +268,11 @@ def build_turn(*, message: str, prompt: str, capability: str, adapter: str, mode
     diag = diagnostic(argv=argv, stdout=stdout, stderr=stderr, exit_code=exit_code,
                       timed_out=timed_out, envelope=envelope)
     nonzero_exit = exit_code is not None and exit_code != 0
-    # Échec d'appel : timeout / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
+    # Échec d'appel : watchdog de sécurité / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
     if (timed_out or envelope is None or nonzero_exit
             or envelope.get("is_error") or envelope.get("subtype") != "success"):
         if timed_out:
-            reason = "timeout"
+            reason = SAFETY_WATCHDOG_EXCEEDED   # PAS un timeout de cognition : fusible de dernier recours
         elif envelope is None:
             reason = "enveloppe illisible"
         elif nonzero_exit:
@@ -299,14 +303,14 @@ def build_turn(*, message: str, prompt: str, capability: str, adapter: str, mode
         return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
                 "error": "format tour invalide", "diagnostic": diag}
     matured = normalize_matured_need(turn.get("matured_need"))   # structure C9 (ou None), lecture legacy tolérée
-    has_matured = matured is not None                            # le modèle a fourni un contenu de besoin mûri
-    # Garde de cohérence A4-2 : un ``matured_need`` n'a de sens qu'avec une appréciation ``ready``. Un besoin
-    # « mûri » porté par un tour ``continue`` est une incohérence cognitive (maturité affirmée sans l'avoir
-    # jugée) ⇒ tour **non conforme**, ``failed``. Ainsi un ``matured_need`` ne vit jamais que sur un ``ready`` —
-    # ce que la garde de convergence de ``realize`` (A4-1) suppose côté relecture.
-    if has_matured and turn["readiness"] != "ready":
-        return {**base, "status": "failed", "reply": None, "readiness": None, "matured_need": None,
-                "error": "matured_need sans appréciation ready", "diagnostic": diag}
+    # A4-2 (CORRIGÉE — défaut révélé par le test produit réel, pursuit_e4b6033b3b08 tour 8) : ``matured_need`` et
+    # ``readiness='continue'`` **COEXISTENT** légitimement (« le besoin est mûr, mais je continue à concevoir /
+    # challenger, sans réaliser »). Un tel tour est donc **valide / ``proposed``**, le ``matured_need`` est
+    # **CONSERVÉ** (jamais perdu, jamais nulled) et le message **reste dans l'historique** relu par le modèle.
+    # La **réalisation reste impossible** sans ``ready`` : ``BrainAI._realize`` (garde A4-1) n'autorise l'arc que si
+    # le DERNIER tour est ``ready`` + ``matured_need``, ET sur acte humain explicite ``realize`` (confirmation D3) —
+    # un ``continue`` ne l'ouvre jamais. La ``readiness`` du modèle est respectée telle quelle : rien n'est
+    # transformé en ``ready`` artificiellement, rien n'est réalisé automatiquement.
     # Garde de cohérence C8/C9 : un besoin **mûr** doit être **définissable**. Un ``ready`` sans ``besoin
     # fondamental`` non vide est incohérent ⇒ ``failed``. La présence d'``inconnues_nommees`` NE bloque PAS un
     # ``ready`` (C8) : seules comptent la présence et la non-vacuité du besoin fondamental (helper unique).
@@ -341,11 +345,16 @@ class ClaudeCodeConversationAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 120.0, claude_bin: str = "claude"):
+                 timeout: float = DEFAULT_WATCHDOG_S, claude_bin: str = "claude",
+                 auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
+                 oauth_token: Optional[str] = None):
         self.model = model
         self.max_budget_usd = max_budget_usd
         self.timeout = timeout
         self.claude_bin = claude_bin
+        self.auth_mode = auth_mode              # bascule d'auth (B1 défaut) — étanchéité J3/T1
+        self.isolated_home = isolated_home
+        self.oauth_token = oauth_token
 
     def build_argv(self, prompt: str) -> List[str]:
         """argv **only** (jamais shell) : print non-interactif, JSON structuré, modèle explicite, plafond coût,
@@ -360,13 +369,19 @@ class ClaudeCodeConversationAdapter:
         ]
 
     def _env(self) -> Dict[str, str]:
-        # Env minimal confiné, **composition identique** aux autres capacités (T3/B1) : PATH/LANG, plus
-        # HOME/USER/LOGNAME si présents. Aucun secret, aucun token ; l'environnement du parent n'est jamais hérité.
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"), "LANG": "C.UTF-8"}
-        for k in ("HOME", "USER", "LOGNAME"):
-            if os.environ.get(k):
-                env[k] = os.environ[k]
-        return env
+        # Env confiné **centralisé** (provider_env) selon la bascule d'auth : B1 (défaut) = comportement
+        # historique ; cible = HOME isolé + jeton explicite (étanchéité J3/T1, RS-030). Canal d'auth déclaré (AM6).
+        return confined_env(self.auth_mode, isolated_home=self.isolated_home, oauth_token=self.oauth_token)
+
+    def contract(self) -> AdapterContract:
+        """Contrat d'adaptateur complet (T2). Déclare un **canal entrant supplémentaire** : l'historique — **scopé
+        à CETTE Pursuit uniquement** (I9 : jamais la Pursuit entière portée dans un canal fournisseur)."""
+        return claude_text_contract(
+            capability=self.capability, auth_channel=auth_channel(self.auth_mode),
+            inbound_channels=inbound_channels(self.auth_mode),
+            tools_disallowed=["Bash", "Edit", "Write", "Read", "WebSearch", "WebFetch"],
+            extra_inbound=[{"channel": "argv:history", "carries": "tours (message/reply) de CETTE Pursuit uniquement",
+                            "pursuit_scoped": True, "carries_whole_pursuit": False}])
 
     def propose(self, message: str, *, history: List[Dict[str, Any]], cwd: Path,
                 budget_remaining_usd: float) -> Dict[str, Any]:

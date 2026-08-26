@@ -732,6 +732,32 @@ def test_convergence_cas5_realization_facts_never_invalidate_convergence(tmp_pat
     assert ctx.stores.turns.read_all() == turns_before                   # la réalisation n'ajoute AUCUN fait turn
 
 
+def test_convergence_cas6_a6_correction_after_confirmation_suspends_and_confirmation_inert(tmp_path):
+    # A6 (JALON 2) : une correction POSTÉRIEURE à un fait ``convergence_confirmed`` **périme** la convergence.
+    # Le gate re-vérifie la chronologie des tours ; le fait de confirmation est **inert** (ne re-déclenche rien,
+    # append-only). Séquence : ready ↓ realize (confirme + arc) ↓ correction ↓ realize ⇒ REFUS ``EVOLVED``.
+    from scc_brainai_bootstrap.builder.confirmations import ConfirmationStore
+    conv = _ConvCap([_turn_env("compris", "ready", matured="Une application pour un refuge"),
+                     _turn_env("finalement, change tout", "continue")])   # correction postérieure
+    caps = _caps_conv(conv); brain = _brain_arc(caps)
+    stores = Stores(proposals=ProposalStore(tmp_path / "prop.jsonl"),
+                    specifications=SpecificationStore(tmp_path / "spec.jsonl"),
+                    builds=BuildStore(tmp_path / "build.jsonl"),
+                    turns=TurnStore(tmp_path / "turns.jsonl"),
+                    confirmations=ConfirmationStore(tmp_path / "conf.jsonl"))
+    ctx = RunContext(budget_usd=5.0, project_id="refuge-demo",
+                     workspace=Workspace(tmp_path / "exec-root", "refuge-demo"), stores=stores)
+    pid = _drive_converse(brain, ctx, "besoin").pursuit_id
+    out1 = brain.pursue(realize_intent(pid, actor="Frédérique"), context=ctx)   # confirmation humaine → arc
+    assert out1.state == "awaiting" and out1.wait_reason == "governance"
+    assert len(stores.confirmations.read_all()) == 1                     # UN fait convergence_confirmed
+    _drive_converse(brain, ctx, "t2", pursuit_ref=pid)                    # CORRECTION postérieure (continue)
+    out2 = brain.pursue(realize_intent(pid, actor="Frédérique"), context=ctx)   # 2e realize
+    assert out2.state == "terminal"                                      # convergence périmée → refus
+    assert out2.refused.startswith("La conversation a évolué depuis la dernière convergence.")
+    assert len(stores.confirmations.read_all()) == 1                     # inert : AUCUN nouveau fait, append-only
+
+
 def test_converse_budget_refused_before_frontier_leaves_no_fact(tmp_path):
     conv = _ConvCap([_turn_env("x", "continue")], floor=0.50)
     caps = _caps_conv(conv); brain = _brain_arc(caps); ctx = _conv_context(tmp_path, budget_usd=0.10)

@@ -224,10 +224,10 @@ scc-brainai resolve planning.propose     # capacité → fournisseur retenu (lia
 ```
 
 ```
-CAPACITÉS (12)  — capacité → fournisseur(s)
+CAPACITÉS (21)  — capacité → fournisseur(s)
   memory.recall            → brainai-memory
   planning.propose         → brainai-planning
-  ...
+  ...   (12 BrainAI + 9 SCC — cf. « capacités : 21 » plus bas)
 ```
 
 **Principes tenus :**
@@ -402,7 +402,7 @@ print(report["banner"])            # "BrainAI READY"
 ## Tests
 
 ```bash
-python -m pytest -q      # 197 tests (déterministes ; démarrage réel des composants)
+python -m pytest -q      # ≈ 660 tests déterministes, 0 € (instantané JALON 3 ; le compte croît par jalon)
 ```
 
 Détails : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

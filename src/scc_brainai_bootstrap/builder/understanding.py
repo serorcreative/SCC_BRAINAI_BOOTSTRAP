@@ -31,8 +31,12 @@ from scc_brainai_bootstrap.builder.claude_code_runtime import (
     parse_envelope,
     redact,
 )
+from scc_brainai_bootstrap.builder.adapter_contract import AdapterContract, claude_text_contract
 from scc_brainai_bootstrap.builder.cognitive_identity import CONDENSED_IDENTITY, compose_prompt
-from scc_brainai_bootstrap.builder.tool_runner import run_confined
+from scc_brainai_bootstrap.builder.provider_env import (
+    AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
+from scc_brainai_bootstrap.builder.tool_runner import (
+    DEFAULT_WATCHDOG_S, SAFETY_WATCHDOG_EXCEEDED, run_confined)
 
 # Alias de compatibilité — NON publics (hors ``__all__``). Préservent les noms internes historiques
 # encore référencés (``understanding._redact``, ``understanding._DIAG_MAX``, …). Comportement identique.
@@ -112,11 +116,11 @@ def build_proposal(*, need: str, prompt: str, capability: str, adapter: str, mod
     diag = diagnostic(argv=argv, stdout=stdout, stderr=stderr, exit_code=exit_code,
                       timed_out=timed_out, envelope=envelope)
     nonzero_exit = exit_code is not None and exit_code != 0
-    # Échec d'appel : timeout / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
+    # Échec d'appel : watchdog de sécurité / exit non nul / enveloppe illisible / erreur cerveau / subtype ≠ success.
     if (timed_out or envelope is None or nonzero_exit
             or envelope.get("is_error") or envelope.get("subtype") != "success"):
         if timed_out:
-            reason = "timeout"
+            reason = SAFETY_WATCHDOG_EXCEEDED   # PAS un timeout de cognition : fusible de dernier recours
         elif envelope is None:
             reason = "enveloppe illisible"
         elif nonzero_exit:
@@ -169,11 +173,16 @@ class ClaudeCodeUnderstandingAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 120.0, claude_bin: str = "claude"):
+                 timeout: float = DEFAULT_WATCHDOG_S, claude_bin: str = "claude",
+                 auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
+                 oauth_token: Optional[str] = None):
         self.model = model
         self.max_budget_usd = max_budget_usd
         self.timeout = timeout
         self.claude_bin = claude_bin
+        self.auth_mode = auth_mode              # bascule d'auth (B1 défaut) — étanchéité J3/T1
+        self.isolated_home = isolated_home
+        self.oauth_token = oauth_token
 
     def build_argv(self, prompt: str) -> List[str]:
         """argv **only** (jamais shell) : print non-interactif, JSON structuré, modèle explicite,
@@ -188,16 +197,18 @@ class ClaudeCodeUnderstandingAdapter:
         ]
 
     def _env(self) -> Dict[str, str]:
-        # Env minimal confiné. HOME + USER/LOGNAME sont requis pour que l'outil **résolve
-        # l'utilisateur** et atteigne sa session (trousseau macOS, ``acct`` utilisateur) — barreau
-        # **B1** de l'échelle d'auth T3, liste minimale **prouvée suffisante**. Aucun secret, aucun
-        # token : l'auth reste **hors-bande** (trousseau), jamais lue ni persistée ici. Cible
-        # industrielle (hors périmètre) : token explicite (CLAUDE_CODE_OAUTH_TOKEN / clé API).
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"), "LANG": "C.UTF-8"}
-        for k in ("HOME", "USER", "LOGNAME"):
-            if os.environ.get(k):
-                env[k] = os.environ[k]
-        return env
+        # Env confiné **centralisé** (provider_env) selon la bascule d'auth : B1 (défaut, barreau trousseau)
+        # = comportement historique ; cible = HOME isolé + jeton explicite (étanchéité J3/T1, RS-030). Le canal
+        # d'auth est **déclaré** (provider_env.auth_channel/inbound_channels) et indépendant de la techno (AM6).
+        return confined_env(self.auth_mode, isolated_home=self.isolated_home, oauth_token=self.oauth_token)
+
+    def contract(self) -> AdapterContract:
+        """Contrat d'adaptateur complet (T2) : capacité, canal d'auth (RV-2), canaux entrants (RV-2 étendue),
+        coût réel/unavailable (I6), plafond natif = **arrêt agrégé** (RS-039), confinement (aucun outil fichier)."""
+        return claude_text_contract(
+            capability=self.capability, auth_channel=auth_channel(self.auth_mode),
+            inbound_channels=inbound_channels(self.auth_mode),
+            tools_disallowed=["Bash", "Edit", "Write", "Read", "WebSearch", "WebFetch"])
 
     def propose(self, need: str, *, cwd: Path, budget_remaining_usd: float) -> Dict[str, Any]:
         """**Appel réel facturable**. Vérifie le budget AVANT (R2/B4) ; refuse sans appel si le reste

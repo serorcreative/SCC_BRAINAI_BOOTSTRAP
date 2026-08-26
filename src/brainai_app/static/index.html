@@ -61,6 +61,20 @@
 <main>
   <h1>Bienvenue dans BrainAI</h1>
   <p class="sub">Que souhaitez-vous obtenir ?</p>
+  <div style="display:flex; align-items:center; gap:10px; margin:-8px 0 16px; font-size:14px;">
+    <label for="mode-select">Mode d'exécution :</label>
+    <select id="mode-select"
+            style="font:inherit; padding:4px 8px; border-radius:8px; border:1px solid #8886; background:transparent; color:inherit;">
+      <option value="demo" selected>Démo — 0 € (réponses pré-écrites)</option>
+      <option value="real">Réel — facturable (cognition réelle)</option>
+    </select>
+  </div>
+  <div style="display:flex; align-items:center; gap:8px; margin:-8px 0 16px; font-size:13px;">
+    <label for="resume-id" class="muted">Reprendre une pursuit :</label>
+    <input id="resume-id" type="text" placeholder="pursuit_… (id existant)"
+           style="flex:1; max-width:300px; font:inherit; padding:4px 8px; border-radius:8px; border:1px solid #8886; background:transparent; color:inherit;">
+    <button id="resume-btn" type="button" style="padding:4px 12px; background:#6b7280;">Reprendre</button>
+  </div>
   <div id="conv"></div>
   <form id="f">
     <textarea id="need" placeholder="Ex. : Une application, une étude, un produit, un scénario, une stratégie, un plan technique… Décrivez simplement ce que vous souhaitez obtenir." autofocus></textarea>
@@ -91,6 +105,9 @@
   const conv = $("conv");
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let currentPursuitId = null;   // l'UI ne conserve QUE l'identifiant ; l'historique vit côté serveur.
+  // Mode d'exécution choisi par l'utilisatrice (démo 0 € par défaut / réel facturable). AUCUNE valeur codée en dur
+  // dans les appels : converse ET realize (et tout futur 'need') transmettent CE mode. Le serveur reste seul juge.
+  const selectedMode = () => { const el = $("mode-select"); return el ? el.value : "demo"; };
 
   function addMsg(text, who) {
     const d = document.createElement("div");
@@ -222,7 +239,7 @@
     const btn = $("realize-btn"); if (btn) btn.disabled = true;
     const view = makeView();
     try {
-      const { ok, status, env } = await post({ kind: "realize", pursuit_ref: currentPursuitId, mode: "demo" });
+      const { ok, status, env } = await post({ kind: "realize", pursuit_ref: currentPursuitId, mode: selectedMode() });
       if (!ok) { view.error("Erreur : " + (env.error || status)); return; }
       removeRealizeAction();
       await drive(replaySource(env.data), view);   // Understanding → Specification → Build, animé
@@ -240,7 +257,7 @@
     $("send").disabled = true;
     removeRealizeAction();                          // un nouveau message remplace une proposition en attente
     try {
-      const { ok, status, env } = await post({ kind: "converse", message, pursuit_ref: currentPursuitId, mode: "demo" });
+      const { ok, status, env } = await post({ kind: "converse", message, pursuit_ref: currentPursuitId, mode: selectedMode() });
       if (!ok) { addMsg("Erreur : " + (env.error || status), "brain"); return; }
       renderConversationalTurn(env.data);
     } catch (err) {
@@ -248,6 +265,19 @@
     } finally {
       $("send").disabled = false;
     }
+  });
+
+  // Reprise d'une pursuit EXISTANTE : l'UI ne fait que RÉ-ATTACHER l'identifiant ; l'historique vit côté serveur
+  // et sera relu par le moteur au prochain tour. AUCUN backend nouveau : converse/realize transmettent déjà
+  // ``pursuit_ref``. Ne fabrique aucun historique, ne rejoue rien, n'autorise aucune réalisation.
+  $("resume-btn").addEventListener("click", () => {
+    const id = $("resume-id").value.trim();
+    if (!id) return;
+    currentPursuitId = id;                          // ré-attache l'identité ; les tours suivants la portent
+    removeRealizeAction();                          // pas de proposition héritée d'une autre pursuit
+    $("p-id").textContent = id;
+    addMsg("Reprise de la pursuit " + id + " — l'historique est relu côté BrainAI au prochain message. "
+      + "Poursuivez la conversation ; la réalisation reste soumise à votre confirmation explicite.", "brain");
   });
 </script>
 </body>

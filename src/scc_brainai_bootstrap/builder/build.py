@@ -24,9 +24,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
+from scc_brainai_bootstrap.builder.adapter_contract import AdapterContract, claude_text_contract
 from scc_brainai_bootstrap.builder.claude_code_runtime import diagnostic, extract_cost, parse_envelope
+from scc_brainai_bootstrap.builder.provider_env import (
+    AUTH_KEYCHAIN_HOME, auth_channel, confined_env, inbound_channels)
 from scc_brainai_bootstrap.builder.specification import SPEC_SCHEMA
-from scc_brainai_bootstrap.builder.tool_runner import run_confined
+from scc_brainai_bootstrap.builder.tool_runner import (
+    DEFAULT_WATCHDOG_S, SAFETY_WATCHDOG_EXCEEDED, run_confined)
 from scc_brainai_bootstrap.builder.workspace import Workspace
 from scc_brainai_bootstrap.core.clock import digest
 
@@ -143,7 +147,7 @@ def _failure_reason(envelope: Optional[Dict[str, Any]], exit_code: Any, timed_ou
             or envelope.get("is_error") or envelope.get("subtype") != "success"):
         return None
     if timed_out:
-        return "timeout"
+        return SAFETY_WATCHDOG_EXCEEDED   # PAS un timeout de cognition : fusible de dernier recours (arc + site)
     if envelope is None:
         return "enveloppe illisible"
     if nonzero_exit:
@@ -231,11 +235,16 @@ class ClaudeCodeBuildAdapter:
     name = "claude_code"
 
     def __init__(self, *, model: str = "haiku", max_budget_usd: float = 0.50,
-                 timeout: float = 120.0, claude_bin: str = "claude"):
+                 timeout: float = DEFAULT_WATCHDOG_S, claude_bin: str = "claude",
+                 auth_mode: str = AUTH_KEYCHAIN_HOME, isolated_home: Optional[str] = None,
+                 oauth_token: Optional[str] = None):
         self.model = model
         self.max_budget_usd = max_budget_usd
         self.timeout = timeout
         self.claude_bin = claude_bin
+        self.auth_mode = auth_mode              # bascule d'auth (B1 défaut) — étanchéité J3/T1
+        self.isolated_home = isolated_home
+        self.oauth_token = oauth_token
 
     def build_argv(self, prompt: str) -> List[str]:
         """argv **only** (jamais shell) : print non-interactif, JSON structuré, modèle explicite, plafond
@@ -251,13 +260,17 @@ class ClaudeCodeBuildAdapter:
         ]
 
     def _env(self) -> Dict[str, str]:
-        # Env minimal confiné, **composition identique** aux autres capacités (T3/B1) : PATH/LANG, plus
-        # HOME/USER/LOGNAME si présents. Aucun secret, aucun token ; l'environnement du parent n'est jamais hérité.
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"), "LANG": "C.UTF-8"}
-        for k in ("HOME", "USER", "LOGNAME"):
-            if os.environ.get(k):
-                env[k] = os.environ[k]
-        return env
+        # Env confiné **centralisé** (provider_env) selon la bascule d'auth : B1 (défaut) = comportement
+        # historique ; cible = HOME isolé + jeton explicite (étanchéité J3/T1, RS-030). Aucune régression sous B1.
+        return confined_env(self.auth_mode, isolated_home=self.isolated_home, oauth_token=self.oauth_token)
+
+    def contract(self) -> AdapterContract:
+        """Contrat d'adaptateur complet (T2) — manifeste = texte seul (aucun outil fichier), coût réel (I6),
+        plafond natif = arrêt agrégé (RS-039)."""
+        return claude_text_contract(
+            capability=self.capability, auth_channel=auth_channel(self.auth_mode),
+            inbound_channels=inbound_channels(self.auth_mode),
+            tools_disallowed=["Bash", "Edit", "Write", "Read", "WebSearch", "WebFetch"])
 
     def propose(self, spec: Dict[str, Any], *, cwd: Path, budget_remaining_usd: float) -> Dict[str, Any]:
         """**Appel réel facturable**. Vérifie le budget AVANT (R2/B4) ; refuse sans appel si le reste ne

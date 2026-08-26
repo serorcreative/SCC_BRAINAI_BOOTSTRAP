@@ -140,16 +140,16 @@ def test_build_turn_proposed_carries_reply_readiness_and_optional_matured():
     assert ready2["status"] == "proposed" and ready2["matured_need"] == struct
 
 
-def test_build_turn_failed_when_matured_need_carried_without_ready_appraisal():
-    # Garde de cohérence A4-2 : un ``matured_need`` porté par un tour ``continue`` est une maturité affirmée
-    # sans avoir été jugée ⇒ tour NON CONFORME (``failed``, motif dédié). Un ``matured_need`` ne vit que sur
-    # un ``ready`` — condition que la relecture de convergence de ``realize`` (A4-1) suppose.
-    incoherent = _mk_turn(envelope=_env({"reply": "je continue", "readiness": "continue",
-                                         "matured_need": "Gérer un refuge"}))
-    assert incoherent["status"] == "failed"
-    assert incoherent["error"] == "matured_need sans appréciation ready"
-    assert incoherent["reply"] is None and incoherent["readiness"] is None
-    assert incoherent["matured_need"] is None and incoherent["diagnostic"] is not None
+def test_build_turn_continue_with_matured_need_is_valid_and_keeps_it():
+    # A4-2 CORRIGÉE (défaut révélé par le test produit réel, pursuit_e4b6033b3b08 tour 8) : ``matured_need`` +
+    # ``continue`` COEXISTENT — BrainAI a une compréhension mûre ET la conception continue. Tour VALIDE
+    # (``proposed``), matured_need CONSERVÉ, message gardé. La réalisation reste gouvernée par ``ready`` + acte
+    # humain ``realize`` (A4-1/D3), jamais par ce tour ; rien n'est transformé en ``ready``.
+    kept = _mk_turn(envelope=_env({"reply": "je continue la conception", "readiness": "continue",
+                                   "matured_need": "Gérer un refuge"}))
+    assert kept["status"] == "proposed" and kept["readiness"] == "continue"
+    assert kept["matured_need"]["besoin_fondamental"] == "Gérer un refuge"   # CONSERVÉ (jamais None/nulled)
+    assert kept["reply"] == "je continue la conception" and kept["error"] is None
     # Un ``matured_need`` vide/blanc sur un ``continue`` reste conforme (il n'est pas un besoin mûri).
     blank = _mk_turn(envelope=_env({"reply": "on continue", "readiness": "continue", "matured_need": "  "}))
     assert blank["status"] == "proposed" and blank["matured_need"] is None
@@ -184,7 +184,7 @@ def test_build_turn_failed_on_bad_readiness_or_unreadable():
     not_json = _mk_turn(envelope=_env("pas du JSON"))
     assert not_json["status"] == "failed" and not_json["error"] == "format tour invalide"
     timed = _mk_turn(envelope=None, timed_out=True)
-    assert timed["status"] == "failed" and timed["error"] == "timeout"
+    assert timed["status"] == "failed" and timed["error"] == "safety_watchdog_exceeded"
     err = _mk_turn(envelope=_env({"reply": "x", "readiness": "ready"}, ok=False))
     assert err["status"] == "failed" and err["error"] != "success"        # jamais "success"
 

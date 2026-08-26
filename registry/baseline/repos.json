@@ -1,0 +1,394 @@
+{
+  "ccsc_root": "/Users/Fred/1A SEROR CREATIVE/SERORCREATIVE SynologyDrive/SynologyDrive/01_CCSC",
+  "kind": "repo_manifest_baseline",
+  "lot": "L0-A",
+  "repo_count": 19,
+  "repos": [
+    {
+      "architectural_role": "Fondation universelle (SccObject/contrats/primitives)",
+      "branch": "main",
+      "clean": true,
+      "head": "f38539340b9f5cbf489b5c9b9b8a449eb3a04e40",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-socle-non-adopte",
+      "logical_name": "foundation",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": null,
+      "path_rel_ccsc": "00_SYSTEM/foundation",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_FOUNDATION.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Orchestrateur socle 5 moteurs (E2E)",
+      "branch": "main",
+      "clean": true,
+      "head": "8f4eff71b7aaf8b7f61f716abf2f404e4d40b4a3",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-hors-produit",
+      "logical_name": "orchestrator",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": null,
+      "path_rel_ccsc": "00_SYSTEM/orchestrator",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_ORCHESTRATOR.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Ingestion — lecteurs d'exports locaux",
+      "branch": "main",
+      "clean": true,
+      "head": "1205923b7cadb9368a4e8222d850aec6be1003f8",
+      "known_test_command": "pytest",
+      "lifecycle_status": "prototype-lecteur",
+      "logical_name": "01_INGESTION",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": null,
+      "path_rel_ccsc": "01_INGESTION",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_INGESTION.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Extraction deterministe (8 extracteurs marqueurs)",
+      "branch": "main",
+      "clean": true,
+      "head": "19c5314ccd42b8084f7636ce5b521178646f868f",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-hors-produit",
+      "logical_name": "03_EXTRACTION",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": null,
+      "path_rel_ccsc": "03_EXTRACTION",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_EXTRACTION.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Connaissance canonique (SHA1)",
+      "branch": "main",
+      "clean": true,
+      "head": "6fdea077e48ec908d5e0f6cdaddd213d8af4f234",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-hors-produit-recuperable",
+      "logical_name": "04_KNOWLEDGE",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": null,
+      "path_rel_ccsc": "04_KNOWLEDGE",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_KNOWLEDGE.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Memoire d'objets valides (couche != 11)",
+      "branch": "main",
+      "clean": true,
+      "head": "8e1678a7549c350ed3ebdc08730a411c8fbf07f6",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-hors-produit",
+      "logical_name": "05_MEMORY",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": null,
+      "path_rel_ccsc": "05_MEMORY",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_MEMORY.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Inference symbolique (!= delib 13)",
+      "branch": "main",
+      "clean": true,
+      "head": "2e7f2deabc8c257c1b21518c6f13a87e3bd5c9eb",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-hors-produit",
+      "logical_name": "06_REASONING",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": null,
+      "path_rel_ccsc": "06_REASONING",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_REASONING.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Runtime gouverne (T3, jobs) ; handlers echo",
+      "branch": "main",
+      "clean": true,
+      "head": "018b2d1ad4f826c0ddbfca12cc7a401fa2be8d14",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-hors-produit",
+      "logical_name": "07_RUNTIME",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "07_RUNTIME",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_RUNTIME.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Exposition REST (serve()=NotImplemented)",
+      "branch": "main",
+      "clean": true,
+      "head": "fd99488bed2138a0b44b4fa3dbf340ee9cb0a452",
+      "known_test_command": "pytest",
+      "lifecycle_status": "dormant",
+      "logical_name": "08_API",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "08_API",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_API.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Supervision / graphe de doctrines",
+      "branch": "main",
+      "clean": true,
+      "head": "0706e408bcbf18a7a18e922715ecdc80416b20c9",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-partiel",
+      "logical_name": "09_CONTROL_PLANE",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "09_CONTROL_PLANE",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_CONTROL_PLANE.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Kernel orchestrant 07/08/09 (a archiver ulterieurement)",
+      "branch": "main",
+      "clean": false,
+      "head": "240e163c867fae7c48c52809db81b103f0fc0716",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-a-archiver",
+      "logical_name": "10_BRAINAI",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "10_BRAINAI",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_KERNEL.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [
+        "src/scc_brainai/sources/NOTICE-brainai-human.md"
+      ],
+      "untracked_count": 1
+    },
+    {
+      "architectural_role": "Memoire episodique append-only",
+      "branch": "main",
+      "clean": true,
+      "head": "4e1efbcc06c8e1bb164c3f756336297d4db73a51",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-produit-partiel",
+      "logical_name": "11_BRAINAI_MEMORY",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "11_BRAINAI_MEMORY",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_MEMORY.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Apprentissage gouverne (non nourri par Pursuits)",
+      "branch": "main",
+      "clean": true,
+      "head": "ebf00903d82c388c0f7effd480bde51a56852067",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-non-raccorde",
+      "logical_name": "12_BRAINAI_LEARNING",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "12_BRAINAI_LEARNING",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_LEARNING.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Deliberation structuree (cognition deterministe a encadrer)",
+      "branch": "main",
+      "clean": true,
+      "head": "3860ac15cadef0ea35147ecab381423f937e7571",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-non-pilote",
+      "logical_name": "13_BRAINAI_REASONING",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "13_BRAINAI_REASONING",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_REASONING.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Planification (Kahn reel, gabarit+additif)",
+      "branch": "main",
+      "clean": true,
+      "head": "e9cdeae4a514456c001395ea3d83aa9ae639ca9d",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-produit-partiel",
+      "logical_name": "14_BRAINAI_PLANNING",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "14_BRAINAI_PLANNING",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_PLANNING.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Decision gouvernee (manifeste, statuts)",
+      "branch": "main",
+      "clean": true,
+      "head": "fd5fcda218ba22103f612532b879df96bc035f2c",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-non-pilote",
+      "logical_name": "15_BRAINAI_DECISION",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "15_BRAINAI_DECISION",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_DECISION.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "Execution gouvernee (6 garde-fous ; effet=echo)",
+      "branch": "main",
+      "clean": true,
+      "head": "93437f33ffd19af6a99d829fb79f5f879b40a3ec",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-produit-partiel",
+      "logical_name": "16_BRAINAI_EXECUTION",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "1.0.0",
+      "path_rel_ccsc": "16_BRAINAI_EXECUTION",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_EXECUTION.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [],
+      "untracked_count": 0
+    },
+    {
+      "architectural_role": "CORE PRODUIT BrainAI (pursue/converse/realize + livraison J2)",
+      "branch": "reunification/l0-integrity",
+      "clean": false,
+      "head": "a798c6b93e78fcbdb83def87c0c8e6c6b9eafba5",
+      "known_test_command": "pytest",
+      "lifecycle_status": "actif-principal",
+      "logical_name": "17_BRAINAI_BOOTSTRAP",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "0.14.0",
+      "path_rel_ccsc": "17_BRAINAI_BOOTSTRAP",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_BOOTSTRAP.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [
+        "scripts/"
+      ],
+      "untracked_count": 1
+    },
+    {
+      "architectural_role": "UI gouvernee complete (transport+AGC) archivee D2",
+      "branch": "main",
+      "clean": false,
+      "head": "d04fca5feea45b1a9282f4f9bcedc92596225e8d",
+      "known_test_command": null,
+      "lifecycle_status": "dormant-recuperable-owner",
+      "logical_name": "SCC_BRAINAI_UI",
+      "modified": [],
+      "modified_count": 0,
+      "package_version": "0.1.0",
+      "path_rel_ccsc": "SCC_BRAINAI_UI",
+      "remotes": [
+        "https://github.com/serorcreative/SCC_BRAINAI_UI.git"
+      ],
+      "stashes": [],
+      "tags": [],
+      "untracked": [
+        "NOTICE-ARCHIVE.md"
+      ],
+      "untracked_count": 1
+    }
+  ]
+}

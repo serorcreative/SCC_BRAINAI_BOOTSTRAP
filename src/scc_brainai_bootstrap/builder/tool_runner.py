@@ -7,7 +7,8 @@ capturé (stdout/stderr/exit/timeout). Garde-fous **non négociables** (Arbitrag
 * **``shell=False``** — jamais de shell ; **argv** seulement (aucune interpolation) ;
 * **``cwd`` confiné** au Workspace du Projet ;
 * **environnement minimal** — l'outil n'hérite pas de l'environnement du parent ;
-* **timeout** réel — au-delà, le processus est tué et l'appel est un **échec** (fait ``timeout``) ;
+* **watchdog de sécurité** — au-delà d'un plafond wall-clock de **dernier recours** (PAS une échéance de
+  cognition), le processus est tué et l'appel est un **échec** étiqueté ``safety_watchdog_exceeded`` ;
 * **capture** intégrale : ``stdout``, ``stderr``, ``exit_code``.
 
 Le ToolRunner ne modifie **aucun** état officiel BrainAI (R5) ; il produit un **résultat** que
@@ -22,6 +23,20 @@ from typing import Any, Dict, List, Optional
 
 # Environnement minimal : de quoi trouver un interpréteur, rien de sensible (pas d'héritage global).
 _MINIMAL_ENV = {"PATH": "/usr/bin:/bin:/usr/local/bin", "LANG": "C.UTF-8"}
+
+# --------------------------------------------------------------------- #
+# Watchdog de SÉCURITÉ de dernier recours — PAS une échéance de cognition.
+# --------------------------------------------------------------------- #
+# Tant que l'infrastructure ne sait pas distinguer une **réflexion longue mais saine** d'un **processus bloqué**
+# (streaming + timeout d'inactivité + annulation utilisateur = palier suivant, RS-059), un **unique plafond
+# wall-clock LARGE** empêche seulement un sous-processus **abandonné / zombie** de tourner éternellement.
+# Ce n'est **jamais** une durée maximale de réflexion : sa valeur est gouvernée en amont
+# (``brainai_app.delivery.watchdog_config`` : défaut / env / explicite, source tracée) et fixée très au-dessus
+# de toute cognition saine réaliste. Son dépassement est étiqueté **``safety_watchdog_exceeded``** (anomalie),
+# jamais « timeout de réflexion ». Un process **mort** (``exit_code != 0``) reste capté **immédiatement et
+# séparément** — il n'a pas besoin du watchdog.
+DEFAULT_WATCHDOG_S = 3600.0                    # 1 h : fusible anti-zombie, PAS une limite de cognition
+SAFETY_WATCHDOG_EXCEEDED = "safety_watchdog_exceeded"   # motif d'échec explicite (distinct de exit≠0)
 
 
 def run_confined(argv: List[str], *, cwd: Path, timeout: float,
@@ -51,4 +66,4 @@ def run_confined(argv: List[str], *, cwd: Path, timeout: float,
                 "timed_out": True}
 
 
-__all__ = ["run_confined"]
+__all__ = ["run_confined", "DEFAULT_WATCHDOG_S", "SAFETY_WATCHDOG_EXCEEDED"]

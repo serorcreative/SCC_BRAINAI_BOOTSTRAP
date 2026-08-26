@@ -232,7 +232,7 @@ def test_build_build_proposed_requires_materialized_artefact():
 
 def test_build_build_failure_branches_have_no_artefact_and_have_diagnostic():
     for env, exit_code, timed_out, needle in [
-        (None, 0, True, "timeout"),
+        (None, 0, True, "safety_watchdog_exceeded"),
         (None, 0, False, "illisible"),
         (_envelope(json.dumps(_VALID_MANIFEST)), 1, False, "exit non nul (1)"),
         (_envelope(json.dumps(_VALID_MANIFEST), ok=False), 0, False, None),
