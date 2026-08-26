@@ -99,6 +99,64 @@ jobs:
           path: 01_CCSC/16_BRAINAI_EXECUTION
           persist-credentials: false
 
+      # --- 8 composants complétant le patrimoine 21/21 (dépôts publics, SHA figés) ---
+      - name: Checkout 00_SYSTEM/foundation (SCC_FOUNDATION @ f385393)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_FOUNDATION
+          ref: f38539340b9f5cbf489b5c9b9b8a449eb3a04e40
+          path: 01_CCSC/00_SYSTEM/foundation
+          persist-credentials: false
+      - name: Checkout 00_SYSTEM/orchestrator (SCC_ORCHESTRATOR @ 8f4eff7)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_ORCHESTRATOR
+          ref: 8f4eff71b7aaf8b7f61f716abf2f404e4d40b4a3
+          path: 01_CCSC/00_SYSTEM/orchestrator
+          persist-credentials: false
+      - name: Checkout 01_INGESTION (SCC_INGESTION @ 1205923)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_INGESTION
+          ref: 1205923b7cadb9368a4e8222d850aec6be1003f8
+          path: 01_CCSC/01_INGESTION
+          persist-credentials: false
+      - name: Checkout 03_EXTRACTION (SCC_EXTRACTION @ 19c5314)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_EXTRACTION
+          ref: 19c5314ccd42b8084f7636ce5b521178646f868f
+          path: 01_CCSC/03_EXTRACTION
+          persist-credentials: false
+      - name: Checkout 05_MEMORY (SCC_MEMORY @ 8e1678a)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_MEMORY
+          ref: 8e1678a7549c350ed3ebdc08730a411c8fbf07f6
+          path: 01_CCSC/05_MEMORY
+          persist-credentials: false
+      - name: Checkout 06_REASONING (SCC_REASONING @ 2e7f2de)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_REASONING
+          ref: 2e7f2deabc8c257c1b21518c6f13a87e3bd5c9eb
+          path: 01_CCSC/06_REASONING
+          persist-credentials: false
+      - name: Checkout 07_RUNTIME (SCC_RUNTIME @ 018b2d1)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_RUNTIME
+          ref: 018b2d1ad4f826c0ddbfca12cc7a401fa2be8d14
+          path: 01_CCSC/07_RUNTIME
+          persist-credentials: false
+      - name: Checkout 08_API (SCC_API @ fd99488)
+        uses: actions/checkout@v4
+        with:
+          repository: serorcreative/SCC_API
+          ref: fd99488bed2138a0b44b4fa3dbf340ee9cb0a452
+          path: 01_CCSC/08_API
+          persist-credentials: false
+
       - name: Python 3.9 (requires-python >= 3.9 ; runtime de la baseline L0-E)
         uses: actions/setup-python@v5
         with:
@@ -131,10 +189,18 @@ jobs:
           check 14_BRAINAI_PLANNING e9cdeae4a514456c001395ea3d83aa9ae639ca9d
           check 15_BRAINAI_DECISION fd5fcda218ba22103f612532b879df96bc035f2c
           check 16_BRAINAI_EXECUTION 93437f33ffd19af6a99d829fb79f5f879b40a3ec
+          check 00_SYSTEM/foundation f38539340b9f5cbf489b5c9b9b8a449eb3a04e40
+          check 00_SYSTEM/orchestrator 8f4eff71b7aaf8b7f61f716abf2f404e4d40b4a3
+          check 01_INGESTION    1205923b7cadb9368a4e8222d850aec6be1003f8
+          check 03_EXTRACTION   19c5314ccd42b8084f7636ce5b521178646f868f
+          check 05_MEMORY       8e1678a7549c350ed3ebdc08730a411c8fbf07f6
+          check 06_REASONING    2e7f2deabc8c257c1b21518c6f13a87e3bd5c9eb
+          check 07_RUNTIME      018b2d1ad4f826c0ddbfca12cc7a401fa2be8d14
+          check 08_API          fd99488bed2138a0b44b4fa3dbf340ee9cb0a452
           # dossiers requis par la résolution config.py (aucun pin sur le Core)
           [ -d "$W/00_SYSTEM/agents" ] && echo "00_SYSTEM/agents : PASS" || { echo "00_SYSTEM/agents : MISSING => FAIL"; fail=1; }
           [ -d "$W/17_BRAINAI_BOOTSTRAP" ] && echo "17_BRAINAI_BOOTSTRAP : présent (Core, NON piné)" || { echo "Core : MISSING => FAIL"; fail=1; }
-          for d in 04_KNOWLEDGE 09_CONTROL_PLANE 10_BRAINAI 11_BRAINAI_MEMORY 12_BRAINAI_LEARNING 13_BRAINAI_REASONING 14_BRAINAI_PLANNING 15_BRAINAI_DECISION 16_BRAINAI_EXECUTION; do
+          for d in 01_INGESTION 03_EXTRACTION 04_KNOWLEDGE 05_MEMORY 06_REASONING 07_RUNTIME 08_API 09_CONTROL_PLANE 10_BRAINAI 11_BRAINAI_MEMORY 12_BRAINAI_LEARNING 13_BRAINAI_REASONING 14_BRAINAI_PLANNING 15_BRAINAI_DECISION 16_BRAINAI_EXECUTION; do
             [ -d "$W/$d/src" ] || { echo "$d/src : MISSING => FAIL"; fail=1; }
           done
           [ $fail -eq 0 ] || { echo "TOPOLOGY = FAIL"; exit 1; }
