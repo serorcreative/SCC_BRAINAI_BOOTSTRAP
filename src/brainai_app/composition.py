@@ -378,7 +378,8 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Opti
                 result=spec_fact.get("specification", {}).get("product_objective", ""),
                 decisions=["convergence confirmée (humain)", "build réel confiné", "vérification HTTP 200 (hash)"],
                 artifact_ref=report.get("build", {}).get("artefact"), preview_ref=report.get("preview_ref"),
-                provenance_ids=report.get("provenance", {}), as_of=outcome.as_of)
+                provenance_ids=report.get("provenance", {}), as_of=outcome.as_of,
+                need=getattr(outcome, "need", None), status=report.get("status"))   # L3 : origine durable + statut réel livré
             report.update(report_memory_ids(entry))       # memory_11_id (canonique) + memory_id (alias égal)
         except MemoryUnavailable as exc:
             report["memory_error"] = str(exc)                     # honnête : jamais silencieux

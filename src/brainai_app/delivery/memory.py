@@ -41,13 +41,24 @@ def open_memory_store(data_dir: Path, *, config: Optional[BrainAIConfig] = None)
 def write_delivery_memory(store: Any, *, pursuit_ref: str, project: str, result: str,
                           decisions: List[str], artifact_ref: Any, preview_ref: Any,
                           provenance_ids: Dict[str, Any], actor: str = "brainai",
-                          as_of: str = "") -> Any:
+                          as_of: str = "", need: Optional[str] = None,
+                          status: str = "delivered") -> Any:
     """Écrit **un** événement mémoire minimal de livraison via ``store.record_event`` (écriture seule).
 
-    ``provenance_ids`` : IDs des faits sources (build, verification, delivered, tool, confirmation…) — la mémoire
-    pointe la provenance, elle ne la duplique pas. Ne lit jamais la mémoire. Renvoie l'entrée écrite (ou son reflet)."""
+    L3 — **continuité durable de la Pursuit** : en plus des références de livraison, on consigne l'origine
+    (``need``), l'identité canonique explicite (``pursuit_id`` == ``pursuit_ref``) et le ``status`` réel.
+    Changements **strictement additifs** : subtype ``pursuit_delivered`` et tags historiques conservés ;
+    ajout du tag de rappel ``pursuit:<pursuit_ref>`` (axe durable pour un futur rappel L4).
+
+    Continuité persistée : ``pursuit_ref``/``pursuit_id``/``need``/``status``/``as_of``/``result``/
+    ``artifact_ref``/``preview_ref``/``provenance_ids`` (+ ``project``/``decisions`` historiques). **Jamais**
+    de payload fournisseur brut ni de ``steps``/``cost_total``/``reply``/``proposal``. ``provenance_ids``
+    pointe la provenance, ne la duplique pas. Ne lit jamais la mémoire. Renvoie l'entrée écrite (ou son reflet)."""
     data = {
         "pursuit_ref": pursuit_ref,
+        "pursuit_id": pursuit_ref,          # identité canonique explicite (== pursuit_ref)
+        "need": need,                        # origine / intention durable de la Pursuit
+        "status": status,                    # statut réel livré
         "project": project,
         "result": result,
         "decisions": list(decisions),
@@ -57,7 +68,7 @@ def write_delivery_memory(store: Any, *, pursuit_ref: str, project: str, result:
         "as_of": as_of,
     }
     return store.record_event("pursuit_delivered", data, actor=actor,
-                              tags=["jalon2", "delivered", "pursuit"])
+                              tags=["jalon2", "delivered", "pursuit", f"pursuit:{pursuit_ref}"])
 
 
 def report_memory_ids(entry: Any) -> Dict[str, Any]:
