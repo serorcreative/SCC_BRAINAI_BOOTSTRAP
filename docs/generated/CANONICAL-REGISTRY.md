@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 147
+- **Entrées totales** : 148
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -20,17 +20,17 @@
 | doctrine | 30 |
 | evolution_record | 62 |
 | invariant | 5 |
-| milestone | 3 |
+| milestone | 4 |
 | ratification | 1 |
 
 ## Catégories de preuve utilisées (calculé)
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 131 |
+| source_evidence | 132 |
 | artifact_evidence | 5 |
-| test_evidence | 2 |
-| runtime_evidence | 2 |
+| test_evidence | 3 |
+| runtime_evidence | 3 |
 
 | Par migration_state | n |
 |---|---|
@@ -110,6 +110,7 @@
 | `MILESTONE-CI-OPTION-A-21-21-PASS-2026-08-26` | milestone | CI Option A — topologie patrimoniale 21/21 validée sur GitHub | ci_option_a_github_pass | — | — | runtime |
 | `MILESTONE-L0-PROVISIONAL-CLOSURE-2026-08-24` | milestone | L0 — clôture provisoire du lot intégrité / source de vérité | provisionally_closed | — | — | artifact |
 | `MILESTONE-L2-CLOSURE-2026-08-27` | milestone | L2 — clôture : store-safety / concurrence / vocabulaire (Memory-11 + Core 17 mergés, CI… | closed | — | — | runtime |
+| `MILESTONE-L3-PURSUIT-MEMORY11-CONTINUITY-2026-08-27` | milestone | L3 — continuité durable Pursuit → Memory-11 à la livraison (enrichissement additif, mer… | merged | — | — | runtime |
 | `RATIF-2026-08-24` | ratification | Ratification propriétaire — Réunification canonique BrainAI (Frédérique, 2026-08-24) | ratifiée | — | — | artifact |
 | `RS-001` | evolution_record | events.jsonl non append-only (EventRecorder.dump→write_text tronquait à chaque processus) | résolue(7c065a5) | o | — | src |
 | `RS-002` | evolution_record | Collision proposal_id (id indépendant du contenu du Brief) | résolue (déjà corrigé avant J0 : proposals.py inclut brief) | o | — | src |
