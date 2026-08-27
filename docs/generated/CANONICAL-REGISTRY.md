@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 143
+- **Entrées totales** : 146
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -16,9 +16,9 @@
 | amendment | 1 |
 | audit | 5 |
 | component | 21 |
-| decision_owner | 10 |
+| decision_owner | 11 |
 | doctrine | 30 |
-| evolution_record | 60 |
+| evolution_record | 62 |
 | invariant | 5 |
 | milestone | 2 |
 | ratification | 1 |
@@ -101,6 +101,7 @@
 | `DEC-08` | decision_owner | Owner n'est PAS une exception à l'invariant T3 (confirmation de portée, pas nouvelle rè… | gelée | o | o | — |
 | `DEC-09` | decision_owner | Objectif septembre 2026 = pilote commercial accompagné, pas un self-service public complet | gelée | o | o | — |
 | `DEC-10` | decision_owner | Réunification par lots atomiques (une seule implémentation active, tests, revue indépen… | gelée | o | o | — |
+| `DEC-11` | decision_owner | Pursuit = unité cognitive durable canonique ; Dossier reste une unité distincte de corr… | gelée | o | — | — |
 | `INV-APPEND-ONLY` | invariant | Faits append-only, immuables, tracés ; provenance/confiance/temporalité/révisions/révoc… | actif | — | — | src |
 | `INV-COGNITION-PROMPT` | invariant | La cognition générative est louée (providers) et pilotée par l'identité/prompt ; les mo… | actif | — | — | src |
 | `INV-PROVIDER-INTERCHANGEABLE` | invariant | Les LLM sont des ressources cognitives interchangeables ; jamais le siège de l'identité… | actif | — | — | src |
@@ -169,6 +170,8 @@
 | `RS-058` | evolution_record | Croissance non bornée du contexte de Pursuit — à chaque tour, l'historique relu côté mo… | consignée — dette réelle, non résolue | o | — | src |
 | `RS-059` | evolution_record | Distinction activité / blocage + annulation (solution cible du watchdog) — l'infra actu… | palier immédiat clôturé (validé réel + déterministe) ; cible planifiée, ouverte | o | — | src |
 | `RS-060` | evolution_record | CADRAGE J4 — cerveau cumulatif (garde-fou anti-dilution). Révélé par l'audit produit (2… | consignée — cadrage protégé, non implémenté | o | — | src |
+| `RS-061` | evolution_record | 05_MEMORY et 04_KNOWLEDGE non durcis en L2 actif — hardening store-safety différé jusqu… | consignée | o | — | — |
+| `RS-062` | evolution_record | Risque externe Synology Drive : écrivain externe ne respectant pas les flock locaux — l… | consignée | o | — | — |
 | `SCC-DOC-0001` | doctrine | SCC-DOC-0001 — Foundation First | Adoptée | — | — | src |
 | `SCC-DOC-0002` | doctrine | SCC-DOC-0002 — Contrat de données | Adoptée | — | — | src |
 | `SCC-DOC-0003` | doctrine | SCC-DOC-0003 — Aucun couplage direct | Adoptée | — | — | src |

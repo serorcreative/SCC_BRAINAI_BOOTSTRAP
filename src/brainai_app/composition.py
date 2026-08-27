@@ -28,7 +28,8 @@ from scc_brainai_bootstrap.builder.turns import TurnStore
 from scc_brainai_bootstrap.builder.workspace import Workspace
 from brainai_app.delivery.budget import BudgetLedger
 from brainai_app.delivery.delivered import DeliveredStore
-from brainai_app.delivery.memory import MemoryUnavailable, open_memory_store, write_delivery_memory
+from brainai_app.delivery.memory import (MemoryUnavailable, open_memory_store, report_memory_ids,
+                                          write_delivery_memory)
 from brainai_app.delivery.runner import BuildRunStore
 from brainai_app.delivery.service import run_delivery
 from brainai_app.delivery.verify import VerificationStore
@@ -378,7 +379,7 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Opti
                 decisions=["convergence confirmée (humain)", "build réel confiné", "vérification HTTP 200 (hash)"],
                 artifact_ref=report.get("build", {}).get("artefact"), preview_ref=report.get("preview_ref"),
                 provenance_ids=report.get("provenance", {}), as_of=outcome.as_of)
-            report["memory_id"] = getattr(entry, "id", None)
+            report.update(report_memory_ids(entry))       # memory_11_id (canonique) + memory_id (alias égal)
         except MemoryUnavailable as exc:
             report["memory_error"] = str(exc)                     # honnête : jamais silencieux
     return report

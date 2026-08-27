@@ -60,4 +60,12 @@ def write_delivery_memory(store: Any, *, pursuit_ref: str, project: str, result:
                               tags=["jalon2", "delivered", "pursuit"])
 
 
-__all__ = ["MemoryUnavailable", "open_memory_store", "write_delivery_memory"]
+def report_memory_ids(entry: Any) -> Dict[str, Any]:
+    """Frontière de vocabulaire (L2 §10) : expose l'ID **canonique** retourné par Memory-11 sous son
+    nom typé ``memory_11_id`` et conserve ``memory_id`` comme **alias strictement égal** (compat, aucun
+    renommage massif ni rupture)."""
+    mid = getattr(entry, "id", None)
+    return {"memory_11_id": mid, "memory_id": mid}
+
+
+__all__ = ["MemoryUnavailable", "open_memory_store", "write_delivery_memory", "report_memory_ids"]
