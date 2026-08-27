@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 148
+- **Entrées totales** : 149
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -20,17 +20,17 @@
 | doctrine | 30 |
 | evolution_record | 62 |
 | invariant | 5 |
-| milestone | 4 |
+| milestone | 5 |
 | ratification | 1 |
 
 ## Catégories de preuve utilisées (calculé)
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 132 |
+| source_evidence | 133 |
 | artifact_evidence | 5 |
-| test_evidence | 3 |
-| runtime_evidence | 3 |
+| test_evidence | 4 |
+| runtime_evidence | 4 |
 
 | Par migration_state | n |
 |---|---|
@@ -111,6 +111,7 @@
 | `MILESTONE-L0-PROVISIONAL-CLOSURE-2026-08-24` | milestone | L0 — clôture provisoire du lot intégrité / source de vérité | provisionally_closed | — | — | artifact |
 | `MILESTONE-L2-CLOSURE-2026-08-27` | milestone | L2 — clôture : store-safety / concurrence / vocabulaire (Memory-11 + Core 17 mergés, CI… | closed | — | — | runtime |
 | `MILESTONE-L3-PURSUIT-MEMORY11-CONTINUITY-2026-08-27` | milestone | L3 — continuité durable Pursuit → Memory-11 à la livraison (enrichissement additif, mer… | merged | — | — | runtime |
+| `MILESTONE-L4-PURSUIT-RETRIEVAL-2026-08-27` | milestone | L4 — rappel en lecture d'une Pursuit depuis Memory-11 (retrieve_pursuit ; premier chemi… | merged | — | — | runtime |
 | `RATIF-2026-08-24` | ratification | Ratification propriétaire — Réunification canonique BrainAI (Frédérique, 2026-08-24) | ratifiée | — | — | artifact |
 | `RS-001` | evolution_record | events.jsonl non append-only (EventRecorder.dump→write_text tronquait à chaque processus) | résolue(7c065a5) | o | — | src |
 | `RS-002` | evolution_record | Collision proposal_id (id indépendant du contenu du Brief) | résolue (déjà corrigé avant J0 : proposals.py inclut brief) | o | — | src |
