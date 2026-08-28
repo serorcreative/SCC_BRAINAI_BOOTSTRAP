@@ -67,7 +67,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: serorcreative/SCC_BRAINAI_LEARNING
-          ref: ebf00903d82c388c0f7effd480bde51a56852067
+          ref: d25353b4cc46d090b19e5bdb9b7dd4d74b15a3bd
           path: 01_CCSC/12_BRAINAI_LEARNING
           persist-credentials: false
       - name: Checkout 13_BRAINAI_REASONING (SCC_BRAINAI_REASONING @ 3860ac1)
@@ -184,7 +184,7 @@ jobs:
           check 09_CONTROL_PLANE 0706e408bcbf18a7a18e922715ecdc80416b20c9
           check 10_BRAINAI      240e163c867fae7c48c52809db81b103f0fc0716
           check 11_BRAINAI_MEMORY 6c32bab1e91bd43328f88d07a255f80c98e9d524
-          check 12_BRAINAI_LEARNING ebf00903d82c388c0f7effd480bde51a56852067
+          check 12_BRAINAI_LEARNING d25353b4cc46d090b19e5bdb9b7dd4d74b15a3bd
           check 13_BRAINAI_REASONING 3860ac15cadef0ea35147ecab381423f937e7571
           check 14_BRAINAI_PLANNING e9cdeae4a514456c001395ea3d83aa9ae639ca9d
           check 15_BRAINAI_DECISION fd5fcda218ba22103f612532b879df96bc035f2c
