@@ -119,17 +119,22 @@ def demo_capabilities() -> Capabilities:
         conversation=_DemoConversation())
 
 
-def real_capabilities() -> Capabilities:
+def real_capabilities(understanding_provider: Optional[str] = None) -> Capabilities:
     """Capacités **réelles** (facturables) — **résolues via le Capability Registry**. Aucun nom de fournisseur,
     aucun import d'adaptateur concret ici : la sélection ``capacité → fournisseur → adaptateur`` vit dans la
-    couche d'infrastructure :mod:`brainai_app.providers` (découplage structurel du fournisseur, I9)."""
+    couche d'infrastructure :mod:`brainai_app.providers` (découplage structurel du fournisseur, I9).
+
+    L6A : ``understanding_provider`` est un **sélecteur opaque** transmis tel quel à l'infrastructure — cette
+    couche n'en connaît **aucune** valeur nominale. ``None`` = fournisseur **par défaut** (mapping et défaut
+    résolus uniquement dans :mod:`brainai_app.providers`) ; une valeur explicite sélectionne un autre fournisseur
+    admis pour ``understand.need`` sans que ce module n'ait à le nommer."""
     from brainai_app import providers
-    return providers.real_capabilities()
+    return providers.real_capabilities(understanding_provider=understanding_provider)
 
 
-def _capabilities(mode: str) -> Capabilities:
+def _capabilities(mode: str, understanding_provider: Optional[str] = None) -> Capabilities:
     if mode == "real":
-        return real_capabilities()
+        return real_capabilities(understanding_provider=understanding_provider)
     return demo_capabilities()
 
 
@@ -181,10 +186,15 @@ def to_viewmodel(outcome: Any, *, need: Optional[str], mode: str, budget_usd: fl
     }
 
 
-def run_pursuit(need: str, *, mode: str = "demo", budget_usd: float = 2.0) -> Dict[str, Any]:
+def run_pursuit(need: str, *, mode: str = "demo", budget_usd: float = 2.0,
+                understanding_provider: Optional[str] = None) -> Dict[str, Any]:
     """**Chemin unique application → moteur** : construit le contexte (hors ``data/``), appelle **uniquement**
-    ``BrainAI.pursue`` et renvoie le ViewModel. En mode ``demo`` : 0 €. En mode ``real`` : facturable."""
-    caps = _capabilities(mode)
+    ``BrainAI.pursue`` et renvoie le ViewModel. En mode ``demo`` : 0 €. En mode ``real`` : facturable.
+
+    L6A : ``understanding_provider`` est un **sélecteur opaque** de la capacité ``understand.need`` que la Pursuit
+    consomme — transmis tel quel à l'infrastructure, jamais interprété ici. ``None`` = fournisseur par défaut
+    (résolu dans :mod:`brainai_app.providers`) ; sans effet en mode ``demo`` (0 €)."""
+    caps = _capabilities(mode, understanding_provider=understanding_provider)
     root = Path(tempfile.mkdtemp(prefix="brainai_ui_"))          # session éphémère, HORS data/ et dépôt
     stores = Stores(proposals=ProposalStore(root / "prop.jsonl"),
                     specifications=SpecificationStore(root / "spec.jsonl"),

@@ -13,6 +13,12 @@ authors = [{ name = "Seror Créative" }]
 keywords = ["scc", "brainai", "bootstrap", "startup"]
 dependencies = []
 
+# Extras OPTIONNELS — la base reste **stdlib pur / 0 réseau / $0**. L'adaptateur OpenAI (L6A) lazy-importe le SDK
+# et fail-close proprement s'il est absent ; l'extra rend l'activation **reproductible** (`pip install .[openai]`),
+# nécessaire uniquement pour l'appel réel gated (GO-secrets). Aucune installation n'est réalisée par déclaration.
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+
 [project.scripts]
 scc-brainai = "scc_brainai_bootstrap.cli:main"
 
