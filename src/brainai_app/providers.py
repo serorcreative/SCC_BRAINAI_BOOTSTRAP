@@ -13,12 +13,13 @@ le fournisseur d'un descriptor **substitue** l'implémentation sans toucher ``co
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from scc_brainai_bootstrap.builder.adapter_contract import require_contract
 from scc_brainai_bootstrap.builder.brainai import Capabilities
 from scc_brainai_bootstrap.builder.build import ClaudeCodeBuildAdapter
 from scc_brainai_bootstrap.builder.conversation import ClaudeCodeConversationAdapter
+from scc_brainai_bootstrap.builder.openai_understanding import OpenAIUnderstandingAdapter
 from scc_brainai_bootstrap.builder.site import ClaudeCodeSiteAdapter
 from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationAdapter
 from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
@@ -47,6 +48,10 @@ DEPLOY_PUBLIC = "deploy.public"
 CLAUDE_CODE = "claude_code"
 # Fournisseur de preview locale (surface loopback interne, distincte du fournisseur de cognition).
 LOCAL_LOOPBACK = "local_loopback"
+# 2ᵉ fournisseur de cognition **réel** (L6A) — interchangeable derrière la MÊME capacité (INV-PROVIDER-INTERCHANGEABLE).
+OPENAI = "openai"
+# Fournisseurs de cognition **admis** pour la sélection explicite (fail-closed hors de cet ensemble).
+COGNITION_PROVIDERS = (CLAUDE_CODE, OPENAI)
 
 # Ordre des capacités → champ de :class:`Capabilities`.
 _CAPABILITY_TO_FIELD = {UNDERSTAND_NEED: "understanding", SPECIFY: "specification",
@@ -126,9 +131,68 @@ def resolve_capabilities(descriptors: List[AgentDescriptor],
     return Capabilities(**resolved)
 
 
-def real_capabilities() -> Capabilities:
-    """Capacités **réelles** (facturables) du chemin produit, obtenues par résolution de capacités."""
-    return resolve_capabilities(default_descriptors(), default_binders())
+def real_capabilities(understanding_provider: Optional[str] = None) -> Capabilities:
+    """Capacités **réelles** (facturables) du chemin produit, obtenues par résolution de capacités.
+
+    L6A — sélection EXPLICITE du fournisseur de la capacité d'entrée ``understand.need`` :
+    - ``None`` (**défaut opaque venant de la composition**) ⇒ mappé **ici et ici seulement** vers le fournisseur
+      par défaut :data:`CLAUDE_CODE` ; comportement **strictement inchangé** (les 4 capacités via ``claude_code``) ;
+    - ``openai`` : ``understanding`` résolu vers l'adaptateur OpenAI ; ``specification``/``build``/``conversation``
+      restent ``claude_code`` (aucune bascule automatique des autres capacités).
+    Fournisseur hors :data:`COGNITION_PROVIDERS` ⇒ **fail-closed** (aucune capacité construite). Aucun fan-out,
+    aucun arbitrage : un seul fournisseur explicite derrière la même capacité (INV-PROVIDER-INTERCHANGEABLE)."""
+    if understanding_provider is None:
+        understanding_provider = CLAUDE_CODE                                     # défaut résolu UNIQUEMENT ici (I9)
+    if understanding_provider == CLAUDE_CODE:
+        return resolve_capabilities(default_descriptors(), default_binders())    # défaut — inchangé
+    if understanding_provider not in COGNITION_PROVIDERS:
+        raise LookupError(f"fournisseur de cognition inconnu : {understanding_provider!r} "
+                          f"(attendu ∈ {COGNITION_PROVIDERS})")
+    dd, db = default_descriptors(), default_binders()                            # specification/build/conversation restent claude_code
+    resolved: Dict[str, Any] = {"understanding": resolve_understanding(understanding_provider)}
+    for slug in (SPECIFY, BUILD_SOFTWARE, CONVERSE):
+        impl = resolve_capability(slug, dd, db)
+        require_contract(impl)
+        resolved[_CAPABILITY_TO_FIELD[slug]] = impl
+    return Capabilities(**resolved)
+
+
+# --------------------------------------------------------------------- #
+# L6A — INTERCHANGEABILITÉ RÉELLE d'un fournisseur de cognition sur la capacité d'entrée
+# (``understand.need``). Sélection EXPLICITE d'un provider derrière la MÊME capacité, via le MÊME registre —
+# aucun fan-out / débat / vote / arbitrage / consensus (lot suivant). Le défaut reste ``claude_code`` (inchangé).
+# --------------------------------------------------------------------- #
+def understanding_descriptors(provider: str = CLAUDE_CODE) -> List[AgentDescriptor]:
+    """Descriptor de la capacité ``understand.need`` pour un fournisseur **explicite** (``claude_code`` ou
+    ``openai``). Changer ``provider`` **substitue** l'implémentation par simple résolution (aucun code métier touché)."""
+    return [
+        AgentDescriptor(id=f"brainai.{provider}.{UNDERSTAND_NEED.replace('.', '_')}", namespace="brainai",
+                        name=f"{provider}:{UNDERSTAND_NEED}", capabilities=[UNDERSTAND_NEED], state=AgentState.ACTIVE,
+                        provider=provider, availability="available", cost=None, priority=0),
+    ]
+
+
+def understanding_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
+    """Binder ``(fournisseur, understand.need) → fabrique`` pour les DEUX fournisseurs réels. Claude Code inchangé
+    (haiku, plafond 0,50 $, watchdog gouverné). OpenAI : modèle configurable (défaut adaptateur), même plafond
+    d'appel **enforced_by_brainai**, client réel construit seulement à l'appel (clé lue via ``OPENAI_API_KEY``)."""
+    wd = load_call_watchdog().timeout_s
+    return {
+        (CLAUDE_CODE, UNDERSTAND_NEED): lambda: ClaudeCodeUnderstandingAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
+        (OPENAI, UNDERSTAND_NEED): lambda: OpenAIUnderstandingAdapter(max_budget_usd=0.50, timeout=wd),
+    }
+
+
+def resolve_understanding(provider: str = CLAUDE_CODE) -> Any:
+    """Résout la capacité ``understand.need`` vers l'implémentation du **fournisseur explicite** demandé, via le
+    registre (l'appelant ne connaît jamais le fournisseur). **Fail-closed** : un fournisseur hors
+    :data:`COGNITION_PROVIDERS` est refusé sans résolution. Rejet structurel T2 (contrat complet) via
+    ``require_contract``. Ne réalise **aucun** appel — retourne l'adaptateur invocable."""
+    if provider not in COGNITION_PROVIDERS:
+        raise LookupError(f"fournisseur de cognition inconnu : {provider!r} (attendu ∈ {COGNITION_PROVIDERS})")
+    impl = resolve_capability(UNDERSTAND_NEED, understanding_descriptors(provider), understanding_binders())
+    require_contract(impl)                          # contrat d'adaptateur complet exigé (T2) — quel que soit le provider
+    return impl
 
 
 # --------------------------------------------------------------------- #
@@ -196,7 +260,9 @@ def real_delivery() -> DeliveryCapabilities:
 
 
 __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
+           "OPENAI", "COGNITION_PROVIDERS",
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
            "default_descriptors", "default_binders", "resolve_capability", "resolve_capabilities",
-           "real_capabilities", "DeliveryCapabilities", "delivery_descriptors", "delivery_binders",
+           "real_capabilities", "understanding_descriptors", "understanding_binders", "resolve_understanding",
+           "DeliveryCapabilities", "delivery_descriptors", "delivery_binders",
            "deferred_deploy_public_descriptor", "resolve_delivery", "real_delivery"]
