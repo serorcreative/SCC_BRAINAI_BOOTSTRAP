@@ -19,6 +19,7 @@ from scc_brainai_bootstrap.builder.adapter_contract import require_contract
 from scc_brainai_bootstrap.builder.brainai import Capabilities
 from scc_brainai_bootstrap.builder.build import ClaudeCodeBuildAdapter
 from scc_brainai_bootstrap.builder.conversation import ClaudeCodeConversationAdapter
+from scc_brainai_bootstrap.builder.gemini_understanding import GeminiUnderstandingAdapter
 from scc_brainai_bootstrap.builder.openai_understanding import OpenAIUnderstandingAdapter
 from scc_brainai_bootstrap.builder.site import ClaudeCodeSiteAdapter
 from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationAdapter
@@ -50,8 +51,10 @@ CLAUDE_CODE = "claude_code"
 LOCAL_LOOPBACK = "local_loopback"
 # 2ᵉ fournisseur de cognition **réel** (L6A) — interchangeable derrière la MÊME capacité (INV-PROVIDER-INTERCHANGEABLE).
 OPENAI = "openai"
+# 3ᵉ fournisseur de cognition **réel** (L6B) — même abstraction, même registre (INV-PROVIDER-INTERCHANGEABLE).
+GEMINI = "gemini"
 # Fournisseurs de cognition **admis** pour la sélection explicite (fail-closed hors de cet ensemble).
-COGNITION_PROVIDERS = (CLAUDE_CODE, OPENAI)
+COGNITION_PROVIDERS = (CLAUDE_CODE, OPENAI, GEMINI)
 
 # Ordre des capacités → champ de :class:`Capabilities`.
 _CAPABILITY_TO_FIELD = {UNDERSTAND_NEED: "understanding", SPECIFY: "specification",
@@ -163,8 +166,9 @@ def real_capabilities(understanding_provider: Optional[str] = None) -> Capabilit
 # aucun fan-out / débat / vote / arbitrage / consensus (lot suivant). Le défaut reste ``claude_code`` (inchangé).
 # --------------------------------------------------------------------- #
 def understanding_descriptors(provider: str = CLAUDE_CODE) -> List[AgentDescriptor]:
-    """Descriptor de la capacité ``understand.need`` pour un fournisseur **explicite** (``claude_code`` ou
-    ``openai``). Changer ``provider`` **substitue** l'implémentation par simple résolution (aucun code métier touché)."""
+    """Descriptor de la capacité ``understand.need`` pour un fournisseur **explicite** admis
+    (:data:`COGNITION_PROVIDERS` : ``claude_code`` / ``openai`` / ``gemini``). Changer ``provider`` **substitue**
+    l'implémentation par simple résolution (aucun code métier touché)."""
     return [
         AgentDescriptor(id=f"brainai.{provider}.{UNDERSTAND_NEED.replace('.', '_')}", namespace="brainai",
                         name=f"{provider}:{UNDERSTAND_NEED}", capabilities=[UNDERSTAND_NEED], state=AgentState.ACTIVE,
@@ -173,13 +177,15 @@ def understanding_descriptors(provider: str = CLAUDE_CODE) -> List[AgentDescript
 
 
 def understanding_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
-    """Binder ``(fournisseur, understand.need) → fabrique`` pour les DEUX fournisseurs réels. Claude Code inchangé
-    (haiku, plafond 0,50 $, watchdog gouverné). OpenAI : modèle configurable (défaut adaptateur), même plafond
-    d'appel **enforced_by_brainai**, client réel construit seulement à l'appel (clé lue via ``OPENAI_API_KEY``)."""
+    """Binder ``(fournisseur, understand.need) → fabrique`` pour les TROIS fournisseurs réels. Claude Code inchangé
+    (haiku, plafond 0,50 $, watchdog gouverné). OpenAI / Gemini : modèle configurable (défaut adaptateur), même
+    plafond d'appel **enforced_by_brainai**, client réel construit seulement à l'appel (clé lue via
+    ``OPENAI_API_KEY`` / ``GEMINI_API_KEY`` respectivement)."""
     wd = load_call_watchdog().timeout_s
     return {
         (CLAUDE_CODE, UNDERSTAND_NEED): lambda: ClaudeCodeUnderstandingAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
         (OPENAI, UNDERSTAND_NEED): lambda: OpenAIUnderstandingAdapter(max_budget_usd=0.50, timeout=wd),
+        (GEMINI, UNDERSTAND_NEED): lambda: GeminiUnderstandingAdapter(max_budget_usd=0.50, timeout=wd),
     }
 
 
@@ -260,7 +266,7 @@ def real_delivery() -> DeliveryCapabilities:
 
 
 __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
-           "OPENAI", "COGNITION_PROVIDERS",
+           "OPENAI", "GEMINI", "COGNITION_PROVIDERS",
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
            "default_descriptors", "default_binders", "resolve_capability", "resolve_capabilities",
            "real_capabilities", "understanding_descriptors", "understanding_binders", "resolve_understanding",
