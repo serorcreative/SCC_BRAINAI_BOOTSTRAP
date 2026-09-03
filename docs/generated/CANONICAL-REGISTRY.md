@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 152
+- **Entrées totales** : 153
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -20,17 +20,17 @@
 | doctrine | 30 |
 | evolution_record | 62 |
 | invariant | 5 |
-| milestone | 8 |
+| milestone | 9 |
 | ratification | 1 |
 
 ## Catégories de preuve utilisées (calculé)
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 136 |
+| source_evidence | 137 |
 | artifact_evidence | 5 |
-| test_evidence | 7 |
-| runtime_evidence | 7 |
+| test_evidence | 8 |
+| runtime_evidence | 8 |
 
 | Par migration_state | n |
 |---|---|
@@ -115,6 +115,7 @@
 | `MILESTONE-L5-PURSUIT-LEARNING12-CONNECTION-2026-08-28` | milestone | L5 — connexion de l'expérience Pursuit (pursuit_delivered) à Learning-12 ; Core repinné… | merged | — | — | runtime |
 | `MILESTONE-L6A-OPENAI-SECOND-PROVIDER-2026-09-02` | milestone | L6A — OpenAI admis comme 2ᵉ fournisseur réel canonique de understand.need ; interchange… | merged | — | — | runtime |
 | `MILESTONE-L6B-GEMINI-THIRD-PROVIDER-2026-09-02` | milestone | L6B — Gemini admis comme 3ᵉ fournisseur réel canonique de understand.need ; interchange… | merged | — | — | runtime |
+| `MILESTONE-L7-MULTI-PROVIDER-ARBITRATION-CONVERGENCE-2026-09-03` | milestone | L7 — première orchestration multi-provider réelle de BrainAI sur understand.need : fan-… | merged | — | — | runtime |
 | `RATIF-2026-08-24` | ratification | Ratification propriétaire — Réunification canonique BrainAI (Frédérique, 2026-08-24) | ratifiée | — | — | artifact |
 | `RS-001` | evolution_record | events.jsonl non append-only (EventRecorder.dump→write_text tronquait à chaque processus) | résolue(7c065a5) | o | — | src |
 | `RS-002` | evolution_record | Collision proposal_id (id indépendant du contenu du Brief) | résolue (déjà corrigé avant J0 : proposals.py inclut brief) | o | — | src |
