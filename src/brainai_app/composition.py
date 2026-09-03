@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from scc_brainai_bootstrap.builder.brainai import (
     BrainAI, Capabilities, RunContext, Stores, converse_intent, need_intent, realize_intent)
+from scc_brainai_bootstrap.builder.arbitrations import ArbitrationStore
 from scc_brainai_bootstrap.builder.builds import BuildStore
 from scc_brainai_bootstrap.builder.confirmations import ConfirmationStore
 from scc_brainai_bootstrap.builder.proposals import ProposalStore
@@ -119,22 +120,31 @@ def demo_capabilities() -> Capabilities:
         conversation=_DemoConversation())
 
 
-def real_capabilities(understanding_provider: Optional[str] = None) -> Capabilities:
+def real_capabilities(understanding_provider: Optional[str] = None, *,
+                      understanding_providers: Optional[List[str]] = None,
+                      arbitration_policy: Optional[Any] = None) -> Capabilities:
     """Capacités **réelles** (facturables) — **résolues via le Capability Registry**. Aucun nom de fournisseur,
     aucun import d'adaptateur concret ici : la sélection ``capacité → fournisseur → adaptateur`` vit dans la
     couche d'infrastructure :mod:`brainai_app.providers` (découplage structurel du fournisseur, I9).
 
-    L6A : ``understanding_provider`` est un **sélecteur opaque** transmis tel quel à l'infrastructure — cette
-    couche n'en connaît **aucune** valeur nominale. ``None`` = fournisseur **par défaut** (mapping et défaut
-    résolus uniquement dans :mod:`brainai_app.providers`) ; une valeur explicite sélectionne un autre fournisseur
-    admis pour ``understand.need`` sans que ce module n'ait à le nommer."""
+    ``understanding_provider`` / ``understanding_providers`` sont des **sélecteurs opaques** transmis tels quels à
+    l'infrastructure — ce module n'en connaît **aucune** valeur nominale. L7 : ``understanding_providers`` (liste)
+    permet un **fan-out explicite** derrière la même capacité ; ``arbitration_policy`` (optionnelle) est
+    provider-neutral. La sémantique exacte (single/défaut/cohorte, fail-closed) est résolue **uniquement** dans
+    :mod:`brainai_app.providers`."""
     from brainai_app import providers
-    return providers.real_capabilities(understanding_provider=understanding_provider)
+    return providers.real_capabilities(understanding_provider=understanding_provider,
+                                       understanding_providers=understanding_providers,
+                                       arbitration_policy=arbitration_policy)
 
 
-def _capabilities(mode: str, understanding_provider: Optional[str] = None) -> Capabilities:
+def _capabilities(mode: str, understanding_provider: Optional[str] = None, *,
+                  understanding_providers: Optional[List[str]] = None,
+                  arbitration_policy: Optional[Any] = None) -> Capabilities:
     if mode == "real":
-        return real_capabilities(understanding_provider=understanding_provider)
+        return real_capabilities(understanding_provider=understanding_provider,
+                                 understanding_providers=understanding_providers,
+                                 arbitration_policy=arbitration_policy)
     return demo_capabilities()
 
 
@@ -187,18 +197,28 @@ def to_viewmodel(outcome: Any, *, need: Optional[str], mode: str, budget_usd: fl
 
 
 def run_pursuit(need: str, *, mode: str = "demo", budget_usd: float = 2.0,
-                understanding_provider: Optional[str] = None) -> Dict[str, Any]:
+                understanding_provider: Optional[str] = None,
+                understanding_providers: Optional[List[str]] = None,
+                arbitration_policy: Optional[Any] = None) -> Dict[str, Any]:
     """**Chemin unique application → moteur** : construit le contexte (hors ``data/``), appelle **uniquement**
     ``BrainAI.pursue`` et renvoie le ViewModel. En mode ``demo`` : 0 €. En mode ``real`` : facturable.
 
-    L6A : ``understanding_provider`` est un **sélecteur opaque** de la capacité ``understand.need`` que la Pursuit
-    consomme — transmis tel quel à l'infrastructure, jamais interprété ici. ``None`` = fournisseur par défaut
-    (résolu dans :mod:`brainai_app.providers`) ; sans effet en mode ``demo`` (0 €)."""
-    caps = _capabilities(mode, understanding_provider=understanding_provider)
+    ``understanding_provider`` / ``understanding_providers`` sont des **sélecteurs opaques** de la capacité
+    ``understand.need`` — transmis tels quels à l'infrastructure, jamais interprétés ici (aucune règle single/cohorte
+    dans ce module). L7 : le câblage du journal d'arbitrage (``ArbitrationStore``, obligatoire côté moteur pour une
+    cohorte) est décidé **uniquement** d'après l'état déjà résolu par :mod:`brainai_app.providers`
+    (``caps.understanding_cohort``). Sans cohorte : chemin single-provider historique **strictement inchangé**
+    (aucun ``ArbitrationStore``)."""
+    caps = _capabilities(mode, understanding_provider=understanding_provider,
+                         understanding_providers=understanding_providers,
+                         arbitration_policy=arbitration_policy)
     root = Path(tempfile.mkdtemp(prefix="brainai_ui_"))          # session éphémère, HORS data/ et dépôt
+    # Source de vérité = état provider-neutral déjà résolu (providers.py décide seul single vs cohorte).
+    fan_out = bool(getattr(caps, "understanding_cohort", ()))
     stores = Stores(proposals=ProposalStore(root / "prop.jsonl"),
                     specifications=SpecificationStore(root / "spec.jsonl"),
-                    builds=BuildStore(root / "build.jsonl"))
+                    builds=BuildStore(root / "build.jsonl"),
+                    arbitrations=ArbitrationStore(root / "arb.jsonl") if fan_out else None)
     ctx = RunContext(budget_usd=budget_usd, project_id="session",
                      workspace=Workspace(root / "exec", "session"), stores=stores)
     brain = BrainAI(caps)

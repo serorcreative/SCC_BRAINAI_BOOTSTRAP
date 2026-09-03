@@ -57,6 +57,8 @@ from scc_brainai_bootstrap.builder.conversation import (
 )
 from scc_brainai_bootstrap.builder.specification import SpecificationCapability, produce_specification
 from scc_brainai_bootstrap.builder.understanding import NeedUnderstandingCapability, build_proposal
+from scc_brainai_bootstrap.builder.understanding_arbitration import ArbitrationPolicy, classify_briefs, converge
+from scc_brainai_bootstrap.builder.arbitrations import build_arbitration_fact
 from scc_brainai_bootstrap.core.clock import short_id
 
 
@@ -151,6 +153,12 @@ class Capabilities:
     specification: SpecificationCapability
     build: BuildCapability
     conversation: Optional[ConversationCapability] = None
+    # L7 — cohorte **optionnelle** (additive) de fournisseurs ``understand.need`` consultés en fan-out EXPLICITE.
+    # Vide (défaut) ⇒ chemin single-provider historique STRICTEMENT inchangé. Chaque membre satisfait le MÊME
+    # Protocol que ``understanding`` (interchangeabilité). ``arbitration_policy`` : politique provider-neutral
+    # optionnelle, injectée, pour résoudre une divergence scalaire (défaut moteur = fail-closed).
+    understanding_cohort: Tuple[NeedUnderstandingCapability, ...] = ()
+    arbitration_policy: Optional[ArbitrationPolicy] = None
 
     def __post_init__(self) -> None:
         for role, value, protocol in (
@@ -166,6 +174,15 @@ class Capabilities:
         if self.conversation is not None and not isinstance(self.conversation, ConversationCapability):
             raise CapabilityInjectionError(
                 "capacité 'conversation' non conforme à ConversationCapability")
+        # L7 — chaque membre de la cohorte doit satisfaire le Protocol understanding (rejet structurel).
+        for i, member in enumerate(self.understanding_cohort):
+            if member is None or not isinstance(member, NeedUnderstandingCapability):
+                raise CapabilityInjectionError(
+                    f"membre {i} de 'understanding_cohort' non conforme à NeedUnderstandingCapability")
+        # L7 — politique d'arbitrage optionnelle : validée seulement si injectée (provider-neutral, Protocol).
+        if self.arbitration_policy is not None and not isinstance(self.arbitration_policy, ArbitrationPolicy):
+            raise CapabilityInjectionError(
+                "'arbitration_policy' injectée non conforme à ArbitrationPolicy")
 
     def roles(self) -> Tuple[str, ...]:
         """Rôles (facultés louées) injectés, dans l'ordre du parcours courant."""
@@ -200,6 +217,7 @@ class Stores:
     builds: Any
     turns: Any = None
     confirmations: Any = None    # journal des confirmations humaines de convergence (D3) ; optionnel
+    arbitrations: Any = None     # L7 — journal append-only des arbitrages multi-provider ; optionnel (fan-out seul)
 
 
 # --------------------------------------------------------------------- #
@@ -431,23 +449,114 @@ class BrainAI:
                            as_of=clock(), need=need, steps=tuple(steps),
                            cost_total=_cost_total(), refused=refused)
 
-        # --- Rung 1 : Understanding (Need → Brief). Pas de wrapper produce_* : la garde budget est dans l'adaptateur.
-        und = self._capabilities.understanding
-        raw = und.propose(need, cwd=cwd, budget_remaining_usd=remaining)
-        if not raw.get("called"):
-            steps.append({"faculty": "understanding", "status": "refused", "refused": raw.get("refused")})
-            return _terminal(refused=raw.get("refused"))
-        brief_fact = stores.proposals.record(build_proposal(
-            need=need, prompt=raw["prompt"], capability=und.capability, adapter=und.name,
-            model=getattr(und, "model", None), envelope=raw["envelope"], exit_code=raw["exit_code"],
-            timed_out=raw["timed_out"], as_of=clock(), argv=raw.get("argv"),
-            stdout=raw.get("stdout"), stderr=raw.get("stderr"), pursuit_ref=pursuit_id))
-        _account(brief_fact.get("cost"))
-        steps.append({"faculty": "understanding", "status": brief_fact["status"],
-                      "fact_id": brief_fact["proposal_id"], "pursuit_ref": brief_fact.get("pursuit_ref"),
-                      "cost": brief_fact.get("cost"), "error": brief_fact.get("error")})
-        if brief_fact["status"] != "proposed":
-            return _terminal()
+        # --- Rung 1 : Understanding (Need → Brief). Branchement UNIQUE selon la présence d'une cohorte L7.
+        # Aucun appel single-provider n'est effectué avant ce branchement : cohorte vide ⇒ exactement 1 propose() ;
+        # cohorte de N ⇒ exactement N propose(). Pas de wrapper produce_* : la garde budget est dans l'adaptateur.
+        cohort = self._capabilities.understanding_cohort
+        if not cohort:
+            # Chemin single-provider historique — STRICTEMENT inchangé (aucune cohorte ⇒ aucun fan-out).
+            und = self._capabilities.understanding
+            raw = und.propose(need, cwd=cwd, budget_remaining_usd=remaining)
+            if not raw.get("called"):
+                steps.append({"faculty": "understanding", "status": "refused", "refused": raw.get("refused")})
+                return _terminal(refused=raw.get("refused"))
+            brief_fact = stores.proposals.record(build_proposal(
+                need=need, prompt=raw["prompt"], capability=und.capability, adapter=und.name,
+                model=getattr(und, "model", None), envelope=raw["envelope"], exit_code=raw["exit_code"],
+                timed_out=raw["timed_out"], as_of=clock(), argv=raw.get("argv"),
+                stdout=raw.get("stdout"), stderr=raw.get("stderr"), pursuit_ref=pursuit_id))
+            _account(brief_fact.get("cost"))
+            steps.append({"faculty": "understanding", "status": brief_fact["status"],
+                          "fact_id": brief_fact["proposal_id"], "pursuit_ref": brief_fact.get("pursuit_ref"),
+                          "cost": brief_fact.get("cost"), "error": brief_fact.get("error")})
+            if brief_fact["status"] != "proposed":
+                return _terminal()
+        else:
+            # Fan-out multi-provider EXPLICITE. Chaque consultant est interrogé SÉPARÉMENT ; chaque contribution
+            # devient un fait ProposalStore distinct (provenance ``adapter`` conservée, jamais fusionnée). BrainAI
+            # arbitre (module provider-neutral) puis compose un brief convergé qui alimente le Rung 2 EXISTANT.
+            # Fail-closed OBLIGATOIRE : une cohorte active EXIGE un journal d'arbitrage (aucune convergence sans
+            # trace). Vérifié AVANT tout appel provider.
+            if stores.arbitrations is None:
+                steps.append({"faculty": "understanding", "status": "refused",
+                              "refused": "fan-out sans journal d'arbitrage (ArbitrationStore requis)"})
+                return _terminal(refused="fan-out sans journal d'arbitrage (ArbitrationStore requis)")
+            # Invariant : toute la cohorte sert la MÊME capacité canonique (rejet fail-closed sinon) — le brief
+            # convergé reste dans cette capacité, jamais une chaîne inventée.
+            cohort_capability = cohort[0].capability
+            if any(getattr(a, "capability", None) != cohort_capability for a in cohort):
+                steps.append({"faculty": "understanding", "status": "refused",
+                              "refused": "cohorte incohérente (capacités hétérogènes)"})
+                return _terminal(refused="cohorte incohérente (capacités hétérogènes)")
+            # Garde budget PRÉ-FLIGHT fail-closed : le fan-out doit tenir dans le budget restant (somme des plafonds).
+            required = sum(float(getattr(a, "max_budget_usd", 0.0) or 0.0) for a in cohort)
+            if remaining < required:
+                steps.append({"faculty": "understanding", "status": "refused",
+                              "refused": "budget insuffisant pour fan-out"})
+                return _terminal(refused="budget insuffisant pour fan-out")
+            contributors: List[Dict[str, Any]] = []
+            for adapter in cohort:
+                raw = adapter.propose(need, cwd=cwd, budget_remaining_usd=remaining)
+                if not raw.get("called"):
+                    # Contribution refusée (budget/clé absente) : tracée, JAMAIS masquée ; non retenue.
+                    steps.append({"faculty": "understanding.contribution", "provider": adapter.name,
+                                  "status": "refused", "refused": raw.get("refused")})
+                    continue
+                cfact = stores.proposals.record(build_proposal(
+                    need=need, prompt=raw["prompt"], capability=adapter.capability, adapter=adapter.name,
+                    model=getattr(adapter, "model", None), envelope=raw["envelope"], exit_code=raw["exit_code"],
+                    timed_out=raw["timed_out"], as_of=clock(), argv=raw.get("argv"),
+                    stdout=raw.get("stdout"), stderr=raw.get("stderr"), pursuit_ref=pursuit_id))
+                _account(cfact.get("cost"))
+                steps.append({"faculty": "understanding.contribution", "provider": adapter.name,
+                              "status": "contributed" if cfact["status"] == "proposed" else cfact["status"],
+                              "fact_id": cfact["proposal_id"], "cost": cfact.get("cost"),
+                              "error": cfact.get("error")})
+                contributors.append(cfact)
+            proposed = [c for c in contributors if c["status"] == "proposed"]
+            contributor_ids = [c["proposal_id"] for c in contributors]
+            # Fail-closed : moins de 2 contributions VALIDES alors qu'un fan-out était explicitement demandé.
+            if len(proposed) < 2:
+                stores.arbitrations.record(build_arbitration_fact(
+                    pursuit_ref=pursuit_id, contributor_proposal_ids=contributor_ids,
+                    classification=None, status="insufficient", rationale=None,
+                    reason="insufficient_contributions", as_of=clock()))
+                steps.append({"faculty": "arbitration", "status": "insufficient", "contributors": len(proposed)})
+                return _terminal()
+            # Arbitrage BrainAI (déterministe, provider-neutral) — la logique appartient à BrainAI, jamais à un LLM.
+            classification = classify_briefs([c["brief"] for c in proposed])
+            result = converge([c["brief"] for c in proposed], classification,
+                              policy=self._capabilities.arbitration_policy)
+            if result["status"] != "converged":
+                stores.arbitrations.record(build_arbitration_fact(
+                    pursuit_ref=pursuit_id, contributor_proposal_ids=contributor_ids,
+                    classification=classification, status="unresolved", rationale=result.get("rationale"),
+                    reason=result.get("reason"), unresolved_fields=result.get("unresolved_fields"),
+                    as_of=clock()))
+                steps.append({"faculty": "arbitration", "status": "unresolved", "reason": result.get("reason"),
+                              "unresolved_fields": result.get("unresolved_fields")})
+                return _terminal()
+            # Convergence : BrainAI est l'AUTEUR du brief convergé (adapter="brainai"), enregistré comme fait
+            # proposal provider-neutral dans la MÊME capacité canonique, qui alimente le Rung 2 EXISTANT
+            # (aucune reconstruction de Rung 2/3).
+            conv_envelope = {"subtype": "success", "is_error": False, "result": result["brief"],
+                             "usage": "unavailable", "api_error_status": None}
+            brief_fact = stores.proposals.record(build_proposal(
+                need=need, prompt="(arbitrage BrainAI — convergence multi-provider provider-neutral)",
+                capability=cohort_capability, adapter="brainai", model=None,
+                envelope=conv_envelope, exit_code=0, timed_out=False, as_of=clock(), pursuit_ref=pursuit_id))
+            _account(brief_fact.get("cost"))
+            stores.arbitrations.record(build_arbitration_fact(
+                pursuit_ref=pursuit_id, contributor_proposal_ids=contributor_ids,
+                classification=classification, status="converged", rationale=result.get("rationale"),
+                converged_proposal_id=brief_fact["proposal_id"], as_of=clock()))
+            steps.append({"faculty": "arbitration", "status": "converged", "contributors": len(proposed),
+                          "converged_fact_id": brief_fact["proposal_id"]})
+            steps.append({"faculty": "understanding", "status": brief_fact["status"],
+                          "fact_id": brief_fact["proposal_id"], "pursuit_ref": brief_fact.get("pursuit_ref"),
+                          "cost": brief_fact.get("cost"), "error": brief_fact.get("error")})
+            if brief_fact["status"] != "proposed":
+                return _terminal()
 
         # --- Rung 2 : Specification (Brief proposé → Spéc). Provenance : spec.brief_ref == brief.proposal_id.
         spec_out = produce_specification(brief_source=brief_fact, adapter=self._capabilities.specification,
