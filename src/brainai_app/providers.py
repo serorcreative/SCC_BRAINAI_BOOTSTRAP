@@ -134,25 +134,55 @@ def resolve_capabilities(descriptors: List[AgentDescriptor],
     return Capabilities(**resolved)
 
 
-def real_capabilities(understanding_provider: Optional[str] = None) -> Capabilities:
+def real_capabilities(understanding_provider: Optional[str] = None, *,
+                      understanding_providers: Optional[List[str]] = None,
+                      arbitration_policy: Optional[Any] = None) -> Capabilities:
     """Capacités **réelles** (facturables) du chemin produit, obtenues par résolution de capacités.
 
-    L6A — sélection EXPLICITE du fournisseur de la capacité d'entrée ``understand.need`` :
-    - ``None`` (**défaut opaque venant de la composition**) ⇒ mappé **ici et ici seulement** vers le fournisseur
-      par défaut :data:`CLAUDE_CODE` ; comportement **strictement inchangé** (les 4 capacités via ``claude_code``) ;
-    - ``openai`` : ``understanding`` résolu vers l'adaptateur OpenAI ; ``specification``/``build``/``conversation``
-      restent ``claude_code`` (aucune bascule automatique des autres capacités).
-    Fournisseur hors :data:`COGNITION_PROVIDERS` ⇒ **fail-closed** (aucune capacité construite). Aucun fan-out,
-    aucun arbitrage : un seul fournisseur explicite derrière la même capacité (INV-PROVIDER-INTERCHANGEABLE)."""
+    Sélection EXPLICITE du/des fournisseur(s) de la capacité d'entrée ``understand.need`` — **un seul sélecteur à
+    la fois** (fail-closed si les deux sont fournis, aucune priorité implicite) :
+    - ``understanding_providers`` **absent** (``None``) ⇒ sélection **single** historique via
+      ``understanding_provider`` (``None`` ⇒ défaut :data:`CLAUDE_CODE`, résolu **ici seulement**, I9 ;
+      comportement **strictement inchangé**) ;
+    - ``understanding_providers`` = **1 nom** ⇒ sélection **single explicite** de ce fournisseur (jamais remplacé
+      par le défaut) ;
+    - ``understanding_providers`` = **≥2 noms distincts admis** ⇒ **fan-out L7** : cohorte résolue, ``understanding``
+      ancré sur le 1ᵉʳ membre, ``understanding_cohort`` renseignée, ``arbitration_policy`` optionnelle transmise ;
+      ``specification``/``build``/``conversation`` restent ``claude_code``.
+    Liste vide / doublon ⇒ ``ValueError`` ; fournisseur hors :data:`COGNITION_PROVIDERS` ⇒ ``LookupError`` — dans
+    tous les cas **fail-closed** (aucune capacité construite)."""
+    if understanding_provider is not None and understanding_providers is not None:
+        raise ValueError("sélecteurs incompatibles : 'understanding_provider' (single) ET "
+                         "'understanding_providers' (liste) fournis simultanément — un seul à la fois")
+    if understanding_providers is not None:
+        provs = list(understanding_providers)
+        if not provs:
+            raise ValueError("understanding_providers vide (liste non vide requise)")
+        if len(set(provs)) != len(provs):
+            raise ValueError(f"understanding_providers contient des doublons : {provs!r}")
+        if len(provs) == 1:
+            understanding_provider = provs[0]                                    # single explicite (jamais défaut)
+        else:
+            cohort = resolve_understanding_cohort(provs)                         # fan-out L7 (fail-closed inclus)
+            dd, db = default_descriptors(), default_binders()                    # autres capacités restent claude_code
+            resolved: Dict[str, Any] = {"understanding": cohort[0]}             # ancre back-compat (1ᵉʳ membre)
+            for slug in (SPECIFY, BUILD_SOFTWARE, CONVERSE):
+                impl = resolve_capability(slug, dd, db)
+                require_contract(impl)
+                resolved[_CAPABILITY_TO_FIELD[slug]] = impl
+            return Capabilities(understanding_cohort=cohort,
+                                arbitration_policy=arbitration_policy, **resolved)
+    # --- Chemin single-provider (historique). ``claude_code`` (défaut OU explicite) → chemin inchangé, JAMAIS
+    #     capturé par le LookupError (la branche ``== CLAUDE_CODE`` précède la garde 'inconnu').
     if understanding_provider is None:
         understanding_provider = CLAUDE_CODE                                     # défaut résolu UNIQUEMENT ici (I9)
     if understanding_provider == CLAUDE_CODE:
-        return resolve_capabilities(default_descriptors(), default_binders())    # défaut — inchangé
+        return resolve_capabilities(default_descriptors(), default_binders())    # défaut/claude explicite — inchangé
     if understanding_provider not in COGNITION_PROVIDERS:
         raise LookupError(f"fournisseur de cognition inconnu : {understanding_provider!r} "
                           f"(attendu ∈ {COGNITION_PROVIDERS})")
     dd, db = default_descriptors(), default_binders()                            # specification/build/conversation restent claude_code
-    resolved: Dict[str, Any] = {"understanding": resolve_understanding(understanding_provider)}
+    resolved = {"understanding": resolve_understanding(understanding_provider)}
     for slug in (SPECIFY, BUILD_SOFTWARE, CONVERSE):
         impl = resolve_capability(slug, dd, db)
         require_contract(impl)
@@ -199,6 +229,20 @@ def resolve_understanding(provider: str = CLAUDE_CODE) -> Any:
     impl = resolve_capability(UNDERSTAND_NEED, understanding_descriptors(provider), understanding_binders())
     require_contract(impl)                          # contrat d'adaptateur complet exigé (T2) — quel que soit le provider
     return impl
+
+
+def resolve_understanding_cohort(providers: List[str]) -> Tuple[Any, ...]:
+    """Résout une **cohorte** de fournisseurs ``understand.need`` (L7, fan-out) en **réutilisant** strictement
+    :func:`resolve_understanding` pour chaque nom — **aucune nouvelle logique de provider**. Retourne les adaptateurs
+    résolus **dans l'ordre demandé** (l'ordre n'induit aucune préférence : l'arbitrage est provider-neutral).
+    **Fail-closed** : liste vide ⇒ ``ValueError`` ; doublon ⇒ ``ValueError`` ; fournisseur hors
+    :data:`COGNITION_PROVIDERS` ⇒ ``LookupError`` (via :func:`resolve_understanding`)."""
+    provs = list(providers)
+    if not provs:
+        raise ValueError("cohorte de cognition vide (au moins un fournisseur requis)")
+    if len(set(provs)) != len(provs):
+        raise ValueError(f"cohorte de cognition avec doublons : {provs!r}")
+    return tuple(resolve_understanding(p) for p in provs)   # fail-closed par fournisseur (LookupError si inconnu)
 
 
 # --------------------------------------------------------------------- #
@@ -270,5 +314,6 @@ __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILI
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
            "default_descriptors", "default_binders", "resolve_capability", "resolve_capabilities",
            "real_capabilities", "understanding_descriptors", "understanding_binders", "resolve_understanding",
+           "resolve_understanding_cohort",
            "DeliveryCapabilities", "delivery_descriptors", "delivery_binders",
            "deferred_deploy_public_descriptor", "resolve_delivery", "real_delivery"]

@@ -97,7 +97,22 @@ class _Handler(BaseHTTPRequestHandler):
                 need = str(payload.get("need") or "").strip()
                 if not need:
                     self._send_json(400, {"error": "champ 'need' requis (non vide)"}); return
-                data = run_pursuit(need, mode=mode)
+                # L7 — opt-in EXPLICITE du fan-out multi-provider via le champ optionnel 'providers'. Absent ⇒
+                # comportement historique single-provider. Validation de **forme** ici (fail-closed) ; la sémantique
+                # single/cohorte et l'appartenance restent décidées par la couche providers.
+                providers_field = payload.get("providers")
+                understanding_providers = None
+                if providers_field is not None:
+                    if (not isinstance(providers_field, list) or not providers_field
+                            or not all(isinstance(p, str) and p.strip() for p in providers_field)):
+                        self._send_json(400, {"error": "champ 'providers' invalide (liste non vide de chaînes)"}); return
+                    if len(set(providers_field)) != len(providers_field):
+                        self._send_json(400, {"error": "champ 'providers' contient des doublons"}); return
+                    understanding_providers = providers_field
+                try:                                            # UN SEUL appel moteur (avec ou sans 'providers')
+                    data = run_pursuit(need, mode=mode, understanding_providers=understanding_providers)
+                except LookupError as exc:                       # fournisseur inconnu (fail-closed couche providers)
+                    self._send_json(400, {"error": f"fournisseur inconnu : {exc}"}); return
             elif kind == "converse":
                 message = str(payload.get("message") or "").strip()
                 if not message:
