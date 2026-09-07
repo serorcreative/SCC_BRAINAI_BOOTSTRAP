@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from brainai_app import contract
-from brainai_app.composition import converse, realize, run_pursuit
+from brainai_app.composition import authorize, converse, realize, run_pursuit
 
 _STATIC = Path(__file__).resolve().parent / "static"
 SESSION_TOKEN = secrets.token_urlsafe(24)          # jeton de session (ADR-UI-001), régénéré à chaque import
@@ -124,8 +124,29 @@ class _Handler(BaseHTTPRequestHandler):
                 if not pursuit_ref:
                     self._send_json(400, {"error": "champ 'pursuit_ref' requis (non vide)"}); return
                 data = realize(pursuit_ref, mode=mode)
+            elif kind == "authorize":
+                # L8 — USER GO (ou refus) du Cost Gate : MÊME endpoint/pipeline, un genre d'intention de plus.
+                # Validation de **forme** ici (fail-closed, TYPE strict : jamais de coercition silencieuse d'un type
+                # invalide en chaîne) ; un refus **métier** (fingerprint obsolète, spec introuvable…) reste un
+                # résultat gouverné légitime renvoyé verbatim (200), jamais un 400 ni une construction (authorize
+                # écrit une autorisation INERTE ; la frontière reste composition._deliver).
+                pursuit_ref = payload.get("pursuit_ref")
+                if not isinstance(pursuit_ref, str) or not pursuit_ref.strip():
+                    self._send_json(400, {"error": "champ 'pursuit_ref' requis (chaîne non vide)"}); return
+                presented_spec_ref = payload.get("presented_spec_ref")
+                if not isinstance(presented_spec_ref, str) or not presented_spec_ref.strip():
+                    self._send_json(400, {"error": "champ 'presented_spec_ref' requis (chaîne non vide)"}); return
+                presented_gate_fingerprint = payload.get("presented_gate_fingerprint")
+                if not isinstance(presented_gate_fingerprint, str) or not presented_gate_fingerprint.strip():
+                    self._send_json(400, {"error": "champ 'presented_gate_fingerprint' requis (chaîne non vide)"}); return
+                decision = payload.get("decision")
+                if decision not in ("approved", "declined"):
+                    self._send_json(400, {"error": "champ 'decision' invalide (approved|declined)"}); return
+                data = authorize(pursuit_ref.strip(), presented_spec_ref=presented_spec_ref.strip(),
+                                 presented_gate_fingerprint=presented_gate_fingerprint.strip(),
+                                 decision=decision, actor=payload.get("actor"))
             else:
-                self._send_json(400, {"error": "kind invalide (need|converse|realize)"}); return
+                self._send_json(400, {"error": "kind invalide (need|converse|realize|authorize)"}); return
             self._send_json(200, contract.envelope("pursue", data, _now())); return
         self._send_json(404, {"error": "opération non servie"})
 

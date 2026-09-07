@@ -101,23 +101,40 @@ def test_deliver_passes_need_and_status_from_outcome(tmp_path, monkeypatch):
     """Câblage réel : ``_deliver`` transmet ``need=outcome.need`` et le ``status`` réellement livré à la
     frontière mémoire, sans casser la frontière L2 ``memory_11_id``/``memory_id``."""
     from brainai_app import composition, providers
+    from scc_brainai_bootstrap.builder.builds import BuildStore
 
     captured = {}
 
     class _Entry:
         id = "mem_00000000002a"
 
+    # L8 : ce test cible la transmission need/status à la queue mémoire de _deliver. Le Cost Gate a ses
+    # propres tests dédiés (test_l8_cost_gate.py, A–F) ; on simule un USER GO valide (comme run_delivery
+    # est stubé) pour atteindre la queue : build attaché à la spec courante, gate résolu, snapshot cohérent,
+    # autorisation approved.
+    build_fact = BuildStore(tmp_path / "build.jsonl").record({
+        "fact_type": "build", "status": "proposed", "artefact": {"file": "m.json"},
+        "spec_ref": "spec_w", "spec_sha256": "x", "model": "demo", "adapter": "demo",
+        "as_of": "2026-07-06T00:00:00+00:00"})
+
     class _Outcome:
         pursuit_id = "pursuit_w"
         as_of = "2026-07-06T00:00:00+00:00"
         need = "besoin réel utilisateur"
+        proposal = {"cost_gate": {"gate_fingerprint": "fp_stub"}}
+        steps = [{"faculty": "build", "status": "proposed", "fact_id": build_fact["build_id"]}]
 
     def _fake_write(store, **kw):
         captured.update(kw)
         return _Entry()
 
     monkeypatch.setattr(composition, "_spec_fact_for",
-                        lambda stores, outcome: {"specification": {"product_objective": "obj"}})
+                        lambda stores, outcome: {"specification_id": "spec_w",
+                                                 "specification": {"product_objective": "obj"}})
+    monkeypatch.setattr(composition, "resolve_cost_gate",
+                        lambda **kw: {"status": "resolved", "gate": {"gate_fingerprint": "fp_stub"},
+                                      "reason": None})
+    monkeypatch.setattr(composition, "authorization_status", lambda *a, **k: "approved")
     monkeypatch.setattr(providers, "real_delivery",
                         lambda: type("Caps", (), {"site_build": None, "preview": None})())
     monkeypatch.setattr(composition, "run_delivery",

@@ -12,11 +12,13 @@ le fournisseur d'un descriptor **substitue** l'implémentation sans toucher ``co
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from scc_brainai_bootstrap.builder.adapter_contract import require_contract
 from scc_brainai_bootstrap.builder.brainai import Capabilities
+from scc_brainai_bootstrap.builder.solution_architecture import (
+    ClaudeCodeArchitectureAdapter, SolutionArchitectureCapability)
 from scc_brainai_bootstrap.builder.build import ClaudeCodeBuildAdapter
 from scc_brainai_bootstrap.builder.conversation import ClaudeCodeConversationAdapter
 from scc_brainai_bootstrap.builder.gemini_understanding import GeminiUnderstandingAdapter
@@ -136,7 +138,8 @@ def resolve_capabilities(descriptors: List[AgentDescriptor],
 
 def real_capabilities(understanding_provider: Optional[str] = None, *,
                       understanding_providers: Optional[List[str]] = None,
-                      arbitration_policy: Optional[Any] = None) -> Capabilities:
+                      arbitration_policy: Optional[Any] = None,
+                      architecture: Optional[SolutionArchitectureCapability] = None) -> Capabilities:
     """Capacités **réelles** (facturables) du chemin produit, obtenues par résolution de capacités.
 
     Sélection EXPLICITE du/des fournisseur(s) de la capacité d'entrée ``understand.need`` — **un seul sélecteur à
@@ -154,6 +157,14 @@ def real_capabilities(understanding_provider: Optional[str] = None, *,
     if understanding_provider is not None and understanding_providers is not None:
         raise ValueError("sélecteurs incompatibles : 'understanding_provider' (single) ET "
                          "'understanding_providers' (liste) fournis simultanément — un seul à la fois")
+    # L8 — capacité architecture (``architect.solution``, provider-assistée) injectée dans TOUTES les capacités
+    # réelles : le mode réel active le Cost Gate (Architecture → Estimate → GATE) ; la construction significative
+    # reste gouvernée par le USER GO (frontière ``composition._deliver``). ``architecture`` INJECTABLE
+    # (provider-neutral) ; ``None`` ⇒ défaut ``claude_code``. Contrat complet exigé (T2) ; le Protocol est revérifié
+    # par ``Capabilities.__post_init__``. CONNECTER, PAS RECONSTRUIRE (L9 = généralisation ExecutionProvider).
+    arch_cap = architecture if architecture is not None else \
+        ClaudeCodeArchitectureAdapter(max_budget_usd=0.50, timeout=load_call_watchdog().timeout_s)
+    require_contract(arch_cap)
     if understanding_providers is not None:
         provs = list(understanding_providers)
         if not provs:
@@ -170,14 +181,15 @@ def real_capabilities(understanding_provider: Optional[str] = None, *,
                 impl = resolve_capability(slug, dd, db)
                 require_contract(impl)
                 resolved[_CAPABILITY_TO_FIELD[slug]] = impl
-            return Capabilities(understanding_cohort=cohort,
-                                arbitration_policy=arbitration_policy, **resolved)
+            return Capabilities(understanding_cohort=cohort, arbitration_policy=arbitration_policy,
+                                architecture=arch_cap, **resolved)
     # --- Chemin single-provider (historique). ``claude_code`` (défaut OU explicite) → chemin inchangé, JAMAIS
     #     capturé par le LookupError (la branche ``== CLAUDE_CODE`` précède la garde 'inconnu').
     if understanding_provider is None:
         understanding_provider = CLAUDE_CODE                                     # défaut résolu UNIQUEMENT ici (I9)
     if understanding_provider == CLAUDE_CODE:
-        return resolve_capabilities(default_descriptors(), default_binders())    # défaut/claude explicite — inchangé
+        return replace(resolve_capabilities(default_descriptors(), default_binders()),
+                       architecture=arch_cap)                                    # défaut/claude + L8 architecture
     if understanding_provider not in COGNITION_PROVIDERS:
         raise LookupError(f"fournisseur de cognition inconnu : {understanding_provider!r} "
                           f"(attendu ∈ {COGNITION_PROVIDERS})")
@@ -187,7 +199,7 @@ def real_capabilities(understanding_provider: Optional[str] = None, *,
         impl = resolve_capability(slug, dd, db)
         require_contract(impl)
         resolved[_CAPABILITY_TO_FIELD[slug]] = impl
-    return Capabilities(**resolved)
+    return Capabilities(architecture=arch_cap, **resolved)
 
 
 # --------------------------------------------------------------------- #
