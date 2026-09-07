@@ -14,15 +14,20 @@ import shutil
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from scc_brainai_bootstrap.builder.brainai import (
     BrainAI, Capabilities, RunContext, Stores, converse_intent, need_intent, realize_intent)
 from scc_brainai_bootstrap.builder.arbitrations import ArbitrationStore
+from scc_brainai_bootstrap.builder.build_authorization import (
+    BuildAuthorizationStore, authorization_status, build_authorization_fact, resolve_cost_gate)
 from scc_brainai_bootstrap.builder.builds import BuildStore
 from scc_brainai_bootstrap.builder.confirmations import ConfirmationStore
+from scc_brainai_bootstrap.builder.cost_estimate import CostEstimateStore
 from scc_brainai_bootstrap.builder.proposals import ProposalStore
+from scc_brainai_bootstrap.builder.solution_architecture import SolutionArchitectureStore
 from scc_brainai_bootstrap.builder.specifications import SpecificationStore
 from scc_brainai_bootstrap.builder.tool_invocations import ToolInvocationStore
 from scc_brainai_bootstrap.builder.turns import TurnStore
@@ -215,10 +220,17 @@ def run_pursuit(need: str, *, mode: str = "demo", budget_usd: float = 2.0,
     root = Path(tempfile.mkdtemp(prefix="brainai_ui_"))          # session éphémère, HORS data/ et dépôt
     # Source de vérité = état provider-neutral déjà résolu (providers.py décide seul single vs cohorte).
     fan_out = bool(getattr(caps, "understanding_cohort", ()))
+    # L8 actif (capacité architecture présente ⇒ mode réel) ⇒ journaux architecture/estimations/autorisations
+    # requis (l'arc refuse fail-closed une architecture sans journaux). Démo : architecture absente ⇒ None (chemin
+    # single-provider historique strictement inchangé, aucun store L8).
+    l8 = getattr(caps, "architecture", None) is not None
     stores = Stores(proposals=ProposalStore(root / "prop.jsonl"),
                     specifications=SpecificationStore(root / "spec.jsonl"),
                     builds=BuildStore(root / "build.jsonl"),
-                    arbitrations=ArbitrationStore(root / "arb.jsonl") if fan_out else None)
+                    arbitrations=ArbitrationStore(root / "arb.jsonl") if fan_out else None,
+                    solution_architectures=SolutionArchitectureStore(root / "architectures.jsonl") if l8 else None,
+                    cost_estimates=CostEstimateStore(root / "cost_estimates.jsonl") if l8 else None,
+                    build_authorizations=BuildAuthorizationStore(root / "build_authorizations.jsonl") if l8 else None)
     ctx = RunContext(budget_usd=budget_usd, project_id="session",
                      workspace=Workspace(root / "exec", "session"), stores=stores)
     brain = BrainAI(caps)
@@ -331,12 +343,18 @@ def _remember(pursuit_id: str, root: Path) -> None:
 
 
 def _session_context(root: Path, *, budget_usd: float) -> RunContext:
-    """Contexte pointé au répertoire stable, **avec** le journal des tours (``turns``) requis par le dialogue."""
+    """Contexte pointé au répertoire stable, **avec** le journal des tours (``turns``) requis par le dialogue et
+    les journaux **L8 persistants** (architecture / estimations / autorisations) — nécessaires pour que le Cost
+    Gate présenté survive au flux converse → realize → USER GO → realize, et que ``_deliver`` puisse recomputer
+    le fingerprint depuis les faits persistés (frontière réelle, CHOIX 2)."""
     stores = Stores(proposals=ProposalStore(root / "prop.jsonl"),
                     specifications=SpecificationStore(root / "spec.jsonl"),
                     builds=BuildStore(root / "build.jsonl"),
                     turns=TurnStore(root / "turns.jsonl"),
-                    confirmations=ConfirmationStore(root / "confirmations.jsonl"))
+                    confirmations=ConfirmationStore(root / "confirmations.jsonl"),
+                    solution_architectures=SolutionArchitectureStore(root / "architectures.jsonl"),
+                    cost_estimates=CostEstimateStore(root / "cost_estimates.jsonl"),
+                    build_authorizations=BuildAuthorizationStore(root / "build_authorizations.jsonl"))
     return RunContext(budget_usd=budget_usd, project_id="session",
                       workspace=Workspace(root / "exec", "session"), stores=stores)
 
@@ -383,6 +401,55 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Opti
     spec_fact = _spec_fact_for(stores, outcome)
     if spec_fact is None:
         return None
+    current_spec_id = spec_fact.get("specification_id")
+
+    # --- L8 : VERROU RÉEL de la construction significative (CHOIX 2). ``produce_build`` (manifeste confiné) a pu
+    # s'exécuter, mais AUCUNE construction significative réelle sans USER GO valide. Ordre fail-closed strict :
+    # (2) le manifeste Build réellement destiné à la livraison est attaché à la Spécification COURANTE ;
+    # (3) reconstruire le Cost Gate depuis les faits L8 PERSISTÉS, ancré sur la spec réellement exécutée ;
+    # (4) le snapshot Outcome prouve que CE gate a été présenté (jamais une autorité) : son fingerprint doit
+    #     EXACTEMENT égaler le fingerprint recomputé ; (5)+(6) l'autorité UNIQUE est ``authorization_status`` relu
+    # sur le store à l'instant de l'exécution, ``approved`` exact requis. Tout écart ⇒ REFUS. NO VALID CURRENT GO
+    # = NO SIGNIFICANT CONSTRUCTION.
+    build_ids = [s.get("fact_id") for s in outcome.steps
+                 if s.get("faculty") == "build" and s.get("status") == "proposed" and s.get("fact_id")]
+    if len(build_ids) != 1:
+        return {"status": "refused", "reason": "build_absent_ou_ambigu", "significant_construction": False}
+    build_facts = [f for f in stores.builds.read_all() if f.get("build_id") == build_ids[0]]
+    if len(build_facts) != 1:
+        return {"status": "refused", "reason": "build_introuvable_ou_ambigu", "significant_construction": False}
+    if build_facts[0].get("spec_ref") != current_spec_id:
+        return {"status": "refused", "reason": "manifeste_non_attache_a_la_spec_courante",
+                "significant_construction": False}
+
+    arch_store = SolutionArchitectureStore(root / "architectures.jsonl")
+    est_store = CostEstimateStore(root / "cost_estimates.jsonl")
+    auth_store = BuildAuthorizationStore(root / "build_authorizations.jsonl")
+    gate = resolve_cost_gate(architecture_store=arch_store, cost_estimate_store=est_store,
+                             pursuit_ref=outcome.pursuit_id, current_spec=spec_fact)
+    if gate["status"] != "resolved":
+        return {"status": "refused", "reason": "cost_gate_" + gate["status"],
+                "detail": gate.get("reason"), "significant_construction": False}
+    current_fp = gate["gate"]["gate_fingerprint"]
+
+    # (4) Snapshot Outcome = PREUVE que CE gate a été présenté avant GO (jamais une autorité).
+    snap = getattr(outcome, "proposal", None)
+    snap_gate = snap.get("cost_gate") if isinstance(snap, dict) else None
+    if not isinstance(snap_gate, dict):
+        return {"status": "refused", "reason": "cost_gate_non_presente_dans_outcome",
+                "significant_construction": False}
+    snap_fp = snap_gate.get("gate_fingerprint")
+    if not isinstance(snap_fp, str) or not snap_fp or snap_fp != current_fp:
+        return {"status": "refused", "reason": "cost_gate_fingerprint_present_incoherent",
+                "presented": snap_fp, "current": current_fp, "significant_construction": False}
+
+    # (5)+(6) Autorité UNIQUE : relecture du store à l'instant de l'exécution ; ``approved`` exact requis.
+    auth = authorization_status(auth_store, pursuit_ref=outcome.pursuit_id, gate_fingerprint=current_fp)
+    if auth != "approved":                                        # none / declined / (fingerprint obsolète ⇒ none)
+        return {"status": "refused", "reason": "no_valid_current_go", "authorization": auth,
+                "gate_fingerprint": current_fp, "significant_construction": False}
+    # (7) USER GO valide pour le fingerprint MATÉRIEL courant → construction significative réelle autorisée.
+
     delivery_caps = providers.real_delivery()                     # site_build + preview, résolus via le registre
     # Budget **gouverné** (RS-047) : env > défaut, source tracée ; ``budget_usd`` (réalisation) borne le plafond.
     budget_cfg = load_delivery_budget()
@@ -439,4 +506,60 @@ def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
     return vm
 
 
-__all__ = ["demo_capabilities", "real_capabilities", "to_viewmodel", "run_pursuit", "converse", "realize"]
+def authorize(pursuit_ref: str, *, presented_spec_ref: str, presented_gate_fingerprint: str,
+              decision: str, actor: Any = None) -> Dict[str, Any]:
+    """**USER GO** (ou refus) du Cost Gate L8 — écrit une ``build_authorization`` **inerte** (record ≠ exécution) ;
+    ne déclenche AUCUNE construction (``_deliver`` reste la frontière et relira l'autorisation à l'exécution).
+
+    Le GO est **ancré sur la proposition effectivement présentée** au caller : ``presented_spec_ref`` (la
+    Spécification affichée, obligatoire) + ``presented_gate_fingerprint`` (le fingerprint affiché, obligatoire).
+    ``authorize`` retrouve **EXACTEMENT** ce fait Spécification (match unique, ``proposed``, appartenant à cette
+    Pursuit si le fait porte ``pursuit_ref``), reconstruit le gate depuis les faits **persistés** ancré sur CETTE
+    spec, et exige ``fingerprint recomputé == presented_gate_fingerprint``. **Aucune** boucle sur l'historique : un
+    ancien gate reproductible n'est PAS le gate courant. Fail-closed : ``decision`` ∈ {``approved``,``declined``} ;
+    refs présentées requises ; spec introuvable/ambiguë/non ``proposed`` ⇒ refus ; fingerprint ≠ recomputé ⇒
+    ``refused`` **sans écriture** (proposition obsolète/dérivée → NEW COST/GO)."""
+    if decision not in ("approved", "declined"):
+        return {"status": "refused", "reason": "decision_invalide", "detail": repr(decision)}
+    if not isinstance(presented_spec_ref, str) or not presented_spec_ref.strip():
+        return {"status": "refused", "reason": "presented_spec_ref_requis"}
+    if not isinstance(presented_gate_fingerprint, str) or not presented_gate_fingerprint.strip():
+        return {"status": "refused", "reason": "presented_gate_fingerprint_requis"}
+    root = _session_dir(pursuit_ref)
+    arch_store = SolutionArchitectureStore(root / "architectures.jsonl")
+    est_store = CostEstimateStore(root / "cost_estimates.jsonl")
+    auth_store = BuildAuthorizationStore(root / "build_authorizations.jsonl")
+    # (3)+(4) Retrouver EXACTEMENT la Spécification présentée (match unique, proposed).
+    specs = [f for f in SpecificationStore(root / "spec.jsonl").read_all()
+             if f.get("specification_id") == presented_spec_ref]
+    if len(specs) != 1:
+        return {"status": "refused", "reason": "specification_presentee_introuvable_ou_ambigue",
+                "presented_spec_ref": presented_spec_ref}
+    current_spec = specs[0]
+    if current_spec.get("status") != "proposed":
+        return {"status": "refused", "reason": "specification_presentee_non_proposed"}
+    # (5)+(6) Reconstruire le gate ancré sur CETTE spec et exiger fingerprint recomputé == présenté.
+    gate = resolve_cost_gate(architecture_store=arch_store, cost_estimate_store=est_store,
+                             pursuit_ref=pursuit_ref, current_spec=current_spec)
+    if gate["status"] != "resolved":
+        return {"status": "refused", "reason": "cost_gate_" + gate["status"], "detail": gate.get("reason")}
+    match = gate["gate"]
+    if match["gate_fingerprint"] != presented_gate_fingerprint:
+        return {"status": "refused", "reason": "fingerprint_present_obsolete",
+                "presented": presented_gate_fingerprint, "current": match["gate_fingerprint"]}
+    # (7) Écriture de la BuildAuthorization inerte, avec la matière réelle (dont dépendances de l'option retenue).
+    stored = auth_store.record(build_authorization_fact(
+        pursuit_ref=pursuit_ref, spec_ref=match["spec_ref"], architecture_ref=match["architecture_ref"],
+        selected_option_id=match["selected_option_id"], estimate_refs=match["estimate_refs"],
+        gate_fingerprint=match["gate_fingerprint"], decision=decision,
+        as_of=datetime.now(timezone.utc).isoformat(), actor=actor,
+        material_assumptions=match["material_assumptions"], paid_providers=match["paid_providers"],
+        paid_external_services=match["paid_external_services"], dependencies=match["dependencies"],
+        cost_unknowns=match["cost_unknowns"]))
+    return {"status": "recorded", "decision": decision, "authorization_id": stored["authorization_id"],
+            "gate_fingerprint": match["gate_fingerprint"], "pursuit_id": pursuit_ref,
+            "selected_option_id": match["selected_option_id"], "actor": stored["actor"]}
+
+
+__all__ = ["demo_capabilities", "real_capabilities", "to_viewmodel", "run_pursuit", "converse", "realize",
+           "authorize"]

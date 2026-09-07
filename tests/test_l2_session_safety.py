@@ -244,16 +244,33 @@ def test_deliver_exposes_memory_11_id_and_alias(tmp_path, monkeypatch):
     ``report["memory_11_id"]`` et ``report["memory_id"]``, tous deux == l'ID retourné par Memory-11.
     Seuls le build lourd et les stores sont stubbés (intégration minimale par monkeypatch)."""
     from brainai_app import composition, providers
+    from scc_brainai_bootstrap.builder.builds import BuildStore
 
     class _Entry:
         id = "mem_00000000002a"
 
+    # L8 : ce test cible la QUEUE mémoire de _deliver. Le Cost Gate a ses propres tests dédiés
+    # (test_l8_cost_gate.py, A–F) ; on simule donc un USER GO valide — au même titre que run_delivery
+    # est stubé — pour atteindre la queue : build proposé attaché à la spec courante, gate résolu,
+    # snapshot cohérent, autorisation approved.
+    build_fact = BuildStore(tmp_path / "build.jsonl").record({
+        "fact_type": "build", "status": "proposed", "artefact": {"file": "m.json"},
+        "spec_ref": "spec_x", "spec_sha256": "x", "model": "demo", "adapter": "demo",
+        "as_of": "2026-07-06T00:00:00+00:00"})
+
     class _Outcome:
         pursuit_id = "pursuit_x"
         as_of = "2026-07-06T00:00:00+00:00"
+        proposal = {"cost_gate": {"gate_fingerprint": "fp_stub"}}
+        steps = [{"faculty": "build", "status": "proposed", "fact_id": build_fact["build_id"]}]
 
     monkeypatch.setattr(composition, "_spec_fact_for",
-                        lambda stores, outcome: {"specification": {"product_objective": "obj"}})
+                        lambda stores, outcome: {"specification_id": "spec_x",
+                                                 "specification": {"product_objective": "obj"}})
+    monkeypatch.setattr(composition, "resolve_cost_gate",
+                        lambda **kw: {"status": "resolved", "gate": {"gate_fingerprint": "fp_stub"},
+                                      "reason": None})
+    monkeypatch.setattr(composition, "authorization_status", lambda *a, **k: "approved")
     monkeypatch.setattr(providers, "real_delivery",
                         lambda: type("Caps", (), {"site_build": None, "preview": None})())
     monkeypatch.setattr(composition, "run_delivery",

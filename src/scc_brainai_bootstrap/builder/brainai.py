@@ -59,7 +59,12 @@ from scc_brainai_bootstrap.builder.specification import SpecificationCapability,
 from scc_brainai_bootstrap.builder.understanding import NeedUnderstandingCapability, build_proposal
 from scc_brainai_bootstrap.builder.understanding_arbitration import ArbitrationPolicy, classify_briefs, converge
 from scc_brainai_bootstrap.builder.arbitrations import build_arbitration_fact
-from scc_brainai_bootstrap.core.clock import short_id
+from scc_brainai_bootstrap.builder.cost_estimate import (
+    INTERNAL_DETERMINISTIC, estimate_costs, is_provider_incomplete, provider_real_value)
+from scc_brainai_bootstrap.builder.solution_architecture import (
+    SolutionArchitectureCapability, compare_architectures, produce_solution_architecture)
+from scc_brainai_bootstrap.builder.build_authorization import authorization_status, gate_fingerprint
+from scc_brainai_bootstrap.core.clock import digest, short_id
 
 
 # --------------------------------------------------------------------- #
@@ -159,6 +164,13 @@ class Capabilities:
     # optionnelle, injectée, pour résoudre une divergence scalaire (défaut moteur = fail-closed).
     understanding_cohort: Tuple[NeedUnderstandingCapability, ...] = ()
     arbitration_policy: Optional[ArbitrationPolicy] = None
+    # L8 — capacité **optionnelle** (additive) de proposition d'architecture (provider-assistée). Absente ⇒ l'arc
+    # produit encore son **manifeste CONFINÉ** (compatibilité du proposal/manifeste, non exécuté), mais **aucun
+    # Cost Gate valide** n'est constitué : la **CONSTRUCTION SIGNIFICATIVE réelle** (``composition._deliver``) est
+    # alors REFUSÉE fail-closed (legacy proposal ≠ legacy execution bypass). Présente ⇒ l'arc insère
+    # Architecture → CostEstimate → sélection/comparaison BrainAI et attache le Cost Gate (fingerprint matériel) à
+    # l'Outcome ``awaiting/governance``. Sélection / coût / GO restent BrainAI-owned.
+    architecture: Optional[SolutionArchitectureCapability] = None
 
     def __post_init__(self) -> None:
         for role, value, protocol in (
@@ -183,6 +195,10 @@ class Capabilities:
         if self.arbitration_policy is not None and not isinstance(self.arbitration_policy, ArbitrationPolicy):
             raise CapabilityInjectionError(
                 "'arbitration_policy' injectée non conforme à ArbitrationPolicy")
+        # L8 — capacité architecture optionnelle : validée seulement si injectée (Protocol).
+        if self.architecture is not None and not isinstance(self.architecture, SolutionArchitectureCapability):
+            raise CapabilityInjectionError(
+                "capacité 'architecture' injectée non conforme à SolutionArchitectureCapability")
 
     def roles(self) -> Tuple[str, ...]:
         """Rôles (facultés louées) injectés, dans l'ordre du parcours courant."""
@@ -218,6 +234,9 @@ class Stores:
     turns: Any = None
     confirmations: Any = None    # journal des confirmations humaines de convergence (D3) ; optionnel
     arbitrations: Any = None     # L7 — journal append-only des arbitrages multi-provider ; optionnel (fan-out seul)
+    solution_architectures: Any = None  # L8 — journal append-only des options d'architecture ; optionnel
+    cost_estimates: Any = None          # L8 — journal append-only des estimations de coût par option ; optionnel
+    build_authorizations: Any = None    # L8 — journal append-only des USER GO (Cost Gate) ; optionnel
 
 
 # --------------------------------------------------------------------- #
@@ -434,11 +453,16 @@ class BrainAI:
         spent = 0.0
         incomplete_cost = False
 
-        def _account(cost: Any) -> None:         # somme HONNÊTE : n'ajoute que les coûts réels, jamais inventés
+        def _account(cost: Any, source: str = "provider_call") -> None:
+            # Somme HONNÊTE PAR SOURCE : seul un ``provider_call`` de coût réel s'ajoute au dépensé ; seul un
+            # ``provider_call`` sans USD réel rend la complétude provider incomplète (→ ``partial``). Une source
+            # ``internal_deterministic`` (computation BrainAI : arbitrage L7, sélection d'architecture, estimation)
+            # n'est JAMAIS un coût fournisseur — coût provider n_a, exclue de la complétude (jamais real=0 fabriqué).
             nonlocal spent, remaining, incomplete_cost
-            if isinstance(cost, dict) and cost.get("kind") == "real" and isinstance(cost.get("value"), (int, float)):
-                spent += float(cost["value"]); remaining -= float(cost["value"])
-            else:
+            val = provider_real_value(cost, source=source)
+            if val is not None:
+                spent += val; remaining -= val
+            if is_provider_incomplete(cost, source=source):
                 incomplete_cost = True
 
         def _cost_total() -> Dict[str, Any]:
@@ -541,11 +565,18 @@ class BrainAI:
             # (aucune reconstruction de Rung 2/3).
             conv_envelope = {"subtype": "success", "is_error": False, "result": result["brief"],
                              "usage": "unavailable", "api_error_status": None}
-            brief_fact = stores.proposals.record(build_proposal(
+            conv_fact = build_proposal(
                 need=need, prompt="(arbitrage BrainAI — convergence multi-provider provider-neutral)",
                 capability=cohort_capability, adapter="brainai", model=None,
-                envelope=conv_envelope, exit_code=0, timed_out=False, as_of=clock(), pursuit_ref=pursuit_id))
-            _account(brief_fact.get("cost"))
+                envelope=conv_envelope, exit_code=0, timed_out=False, as_of=clock(), pursuit_ref=pursuit_id)
+            # Correctif L8 (coût par source) : ce brief est une computation DÉTERMINISTE interne BrainAI, PAS un
+            # appel fournisseur. Coût provider = ``n_a`` (ni ``real=0`` fabriqué, ni ``unavailable`` comme un
+            # fournisseur muet) ; ``cost_source=internal_deterministic`` ⇒ exclu de la complétude provider. Un
+            # ``partial`` légitime dû à un VRAI fournisseur ``unavailable`` reste inchangé.
+            conv_fact["cost"] = {"value": None, "kind": "n_a"}
+            conv_fact["cost_source"] = INTERNAL_DETERMINISTIC
+            brief_fact = stores.proposals.record(conv_fact)
+            _account(brief_fact.get("cost"), INTERNAL_DETERMINISTIC)
             stores.arbitrations.record(build_arbitration_fact(
                 pursuit_ref=pursuit_id, contributor_proposal_ids=contributor_ids,
                 classification=classification, status="converged", rationale=result.get("rationale"),
@@ -573,6 +604,118 @@ class BrainAI:
         if spec_fact["status"] != "proposed":
             return _terminal()
 
+        # --- L8 : Solution Architecture (options) → Cost Estimate PAR option → Comparaison/Sélection BrainAI →
+        # Cost Gate. Inséré entre Spécification et Build. Manifeste confiné (Rung 3) toujours produit ensuite (non
+        # exécuté) ; le Cost Gate (fingerprint MATÉRIEL) est attaché à l'Outcome awaiting/governance et fera
+        # AUTORITÉ à la frontière de construction significative réelle (``composition._deliver``). Capacité
+        # architecture ABSENTE ⇒ étapes L8 sautées, aucun gate ⇒ aucune construction significative autorisée.
+        # IDEMPOTENCE RESUME (scellée par Pursuit) : pour un même ``(pursuit_ref, spec_ref, spec_sha256)`` intact,
+        # l'architecture et les estimations ``proposed`` déjà produites sont RELUES/RÉUTILISÉES — aucun nouvel appel
+        # provider — afin que le fingerprint reste identique (le USER GO autorise exactement ce qui a été présenté).
+        # Lookups fail-closed ; ambiguïté (faits incompatibles pour le même état canonique) ⇒ STOP ; un fait
+        # ``failed`` n'est JAMAIS réutilisé ; aucun fait d'un autre Pursuit ne peut satisfaire le GO courant.
+        cost_gate: Optional[Dict[str, Any]] = None
+        arch_cap = self._capabilities.architecture
+        if arch_cap is not None:
+            if stores.solution_architectures is None or stores.cost_estimates is None:
+                steps.append({"faculty": "architecture", "status": "refused",
+                              "refused": "L8 actif sans journaux (SolutionArchitectureStore + CostEstimateStore requis)"})
+                return _terminal(refused="L8 actif sans journaux requis")
+            spec_id = spec_fact["specification_id"]
+            spec_sha = digest(spec_fact.get("specification"))
+            # Reprise idempotente scellée par CONTENU : ``pursuit_ref`` + ``spec_sha256`` (le ``spec_ref`` =
+            # ``specification_id`` embarque ``as_of`` et change à chaque re-dérivation d'un MÊME contenu ; il reste
+            # conservé dans le fait pour la provenance mais n'est PAS la clé de réutilisation). Contenu de spec
+            # différent ⇒ pas de réutilisation (comportement correct).
+            existing_arch = [f for f in stores.solution_architectures.read_all()
+                             if f.get("fact_type") == "solution_architecture" and f.get("status") == "proposed"
+                             and f.get("pursuit_ref") == pursuit_id and f.get("spec_sha256") == spec_sha]
+            if existing_arch:
+                arch_ids = {f["architecture_id"] for f in existing_arch}
+                if len(arch_ids) > 1:                    # ambiguïté : architectures incompatibles pour le même état
+                    steps.append({"faculty": "architecture", "status": "refused",
+                                  "refused": "architectures proposées incompatibles pour la même Pursuit/spec (fail-closed)"})
+                    return _terminal(refused="architectures proposées incompatibles (fail-closed)")
+                arch_fact = existing_arch[0]
+                steps.append({"faculty": "architecture", "status": "reused",
+                              "fact_id": arch_fact["architecture_id"]})   # aucun appel provider en reprise
+            else:
+                arch_out = produce_solution_architecture(
+                    spec_source=spec_fact, adapter=arch_cap, store=stores.solution_architectures,
+                    budget_remaining_usd=remaining, cwd=cwd, pursuit_ref=pursuit_id, clock=clock)
+                if not arch_out["attempted"]:
+                    steps.append({"faculty": "architecture", "status": "refused", "refused": arch_out.get("refused")})
+                    return _terminal(refused=arch_out.get("refused"))
+                arch_fact = arch_out["fact"]
+                _account(arch_fact.get("cost"), arch_fact.get("cost_source", "provider_call"))  # provider_call réel
+                steps.append({"faculty": "architecture", "status": arch_fact["status"],
+                              "fact_id": arch_fact["architecture_id"], "cost": arch_fact.get("cost"),
+                              "error": arch_fact.get("error")})
+                if arch_fact["status"] != "proposed":
+                    return _terminal()
+            # Cost Estimate PAR option — déterministe BrainAI (internal_deterministic : aucun coût provider). Reprise
+            # idempotente scellée ``(pursuit_ref, architecture_ref, option_ref)`` ; ambiguïté ⇒ STOP ; ``failed``
+            # jamais réutilisé ; l'``option_ref`` réutilisé doit exister EXACTEMENT dans les options de l'architecture.
+            option_ids = {o["id"] for o in arch_fact["options"]}
+            estimates: Dict[str, Any] = {}
+            for opt in arch_fact["options"]:
+                existing_e = [f for f in stores.cost_estimates.read_all()
+                              if f.get("fact_type") == "cost_estimate" and f.get("status") == "proposed"
+                              and f.get("pursuit_ref") == pursuit_id
+                              and f.get("architecture_ref") == arch_fact["architecture_id"]
+                              and f.get("option_ref") == opt["id"]]
+                if existing_e:
+                    e_ids = {f["estimate_id"] for f in existing_e}
+                    if len(e_ids) > 1:
+                        steps.append({"faculty": "cost_estimate", "status": "refused",
+                                      "refused": f"estimations incompatibles pour l'option {opt['id']} (fail-closed)"})
+                        return _terminal(refused="estimations incompatibles (fail-closed)")
+                    e_fact = existing_e[0]
+                    if e_fact.get("option_ref") not in option_ids:   # cohérence : option toujours présente
+                        steps.append({"faculty": "cost_estimate", "status": "refused",
+                                      "refused": "estimation réutilisée dont l'option n'existe plus dans l'architecture (fail-closed)"})
+                        return _terminal(refused="estimation incohérente avec l'architecture (fail-closed)")
+                else:
+                    e_fact = stores.cost_estimates.record(estimate_costs(
+                        opt, pursuit_ref=pursuit_id, architecture_ref=arch_fact["architecture_id"], as_of=clock()))
+                estimates[opt["id"]] = e_fact
+                steps.append({"faculty": "cost_estimate", "status": e_fact["status"], "option_ref": opt["id"],
+                              "fact_id": e_fact["estimate_id"], "cost_completeness": e_fact["cost_completeness"]})
+            # Comparaison / sélection BrainAI (déterministe, provider-neutral, POST-estimation).
+            comparison = compare_architectures(arch_fact["options"], estimates)
+            selected = comparison["selected"]
+            selected_est = estimates.get(comparison["selected_id"])
+            material_assumptions = (selected_est or {}).get("material_assumptions", [])
+            # v1 : « payant » non structuré dans l'option ⇒ NE PAS inventer. paid_* = [] ; le coût du service reste
+            # unknown. Un changement de service externe reste capté via selected_option.external_services (fingerprint).
+            paid_external: List[str] = []
+            paid_providers: List[str] = []
+            fp = gate_fingerprint(spec_sha256=arch_fact["spec_sha256"],
+                                  selected_option_id=comparison["selected_id"],
+                                  comparison_options=arch_fact["options"], comparison_estimates=estimates,
+                                  cost_unknowns=comparison["cost_unknowns"], paid_providers=paid_providers,
+                                  paid_external_services=paid_external)
+            auth = authorization_status(stores.build_authorizations, pursuit_ref=pursuit_id, gate_fingerprint=fp)
+            cost_gate = {
+                "spec_ref": spec_id,
+                "architecture_ref": arch_fact["architecture_id"],
+                "selected_option_id": comparison["selected_id"],
+                "selection_rationale": comparison["selection_rationale"],
+                "decisive_criteria": comparison["decisive_criteria"],
+                "cost_decisive": comparison["cost_decisive"],
+                "comparison": comparison["comparison"],
+                "cost_unknowns": comparison["cost_unknowns"],
+                "estimate_refs": sorted(e["estimate_id"] for e in estimates.values()),
+                "paid_external_services": paid_external,
+                "paid_providers": paid_providers,
+                "material_assumptions": material_assumptions,
+                "gate_fingerprint": fp,
+                "authorization": auth,               # approved | declined | none (autorité finale à _deliver)
+            }
+            steps.append({"faculty": "cost_gate", "status": auth, "gate_fingerprint": fp,
+                          "selected_option_id": comparison["selected_id"],
+                          "cost_unknowns": comparison["cost_unknowns"]})
+
         # --- Rung 3 : Build (Spéc proposée → Manifeste confiné). Provenance : build.spec_ref == spec.specification_id.
         build_out = produce_build(spec_source=spec_fact, adapter=self._capabilities.build,
                                   store=stores.builds, workspace=workspace,
@@ -590,9 +733,13 @@ class BrainAI:
             return _terminal()
 
         # --- Succès : proposition complète de la Pursuit, EN ATTENTE de gouvernance humaine (jamais autoritatif).
+        # Quand L8 est actif, l'Outcome PORTE le Cost Gate (architecture sélectionnée + coûts + inconnues +
+        # hypothèses matérielles + fingerprint + statut d'autorisation) ; ce gate fait AUTORITÉ à la frontière de
+        # construction significative réelle (``composition._deliver``). Le manifeste (Rung 3) reste confiné/non exécuté.
         return Outcome(state="awaiting", wait_reason="governance", project_id=project_id,
                        pursuit_id=pursuit_id, as_of=clock(), need=need, steps=tuple(steps),
-                       artefact=build_fact.get("artefact"), cost_total=_cost_total())
+                       artefact=build_fact.get("artefact"), cost_total=_cost_total(),
+                       proposal=({"cost_gate": cost_gate} if cost_gate is not None else None))
 
     # ----------------------------------------------------------------- #
     # Dialogue — une conversation EST une Pursuit (même identité, tours append-only)
