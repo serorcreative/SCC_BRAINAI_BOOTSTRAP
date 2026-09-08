@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 154
+- **Entrées totales** : 155
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -20,17 +20,17 @@
 | doctrine | 30 |
 | evolution_record | 62 |
 | invariant | 5 |
-| milestone | 10 |
+| milestone | 11 |
 | ratification | 1 |
 
 ## Catégories de preuve utilisées (calculé)
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 138 |
+| source_evidence | 139 |
 | artifact_evidence | 5 |
-| test_evidence | 9 |
-| runtime_evidence | 9 |
+| test_evidence | 10 |
+| runtime_evidence | 10 |
 
 | Par migration_state | n |
 |---|---|
@@ -117,6 +117,7 @@
 | `MILESTONE-L6B-GEMINI-THIRD-PROVIDER-2026-09-02` | milestone | L6B — Gemini admis comme 3ᵉ fournisseur réel canonique de understand.need ; interchange… | merged | — | — | runtime |
 | `MILESTONE-L7-MULTI-PROVIDER-ARBITRATION-CONVERGENCE-2026-09-03` | milestone | L7 — première orchestration multi-provider réelle de BrainAI sur understand.need : fan-… | merged | — | — | runtime |
 | `MILESTONE-L8-SOLUTION-ARCHITECTURE-COST-GATE-2026-09-08` | milestone | L8 — Solution Architecture + Cost Gate : capacité architect.solution provider-neutre (d… | merged | — | — | runtime |
+| `MILESTONE-L9-MULTI-BUILDER-EXECUTION-2026-09-08` | milestone | L9 — Multi-Builder : BuildProvider interchangeable derrière la capacité canonique build… | merged | — | — | runtime |
 | `RATIF-2026-08-24` | ratification | Ratification propriétaire — Réunification canonique BrainAI (Frédérique, 2026-08-24) | ratifiée | — | — | artifact |
 | `RS-001` | evolution_record | events.jsonl non append-only (EventRecorder.dump→write_text tronquait à chaque processus) | résolue(7c065a5) | o | — | src |
 | `RS-002` | evolution_record | Collision proposal_id (id indépendant du contenu du Brief) | résolue (déjà corrigé avant J0 : proposals.py inclut brief) | o | — | src |
