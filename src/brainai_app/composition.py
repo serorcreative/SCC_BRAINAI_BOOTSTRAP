@@ -389,7 +389,8 @@ def _spec_fact_for(stores: Stores, outcome: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Optional[Dict[str, Any]]:
+def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float,
+             build_provider: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Livraison **réelle** post-arc (JALON 2) : build confiné du site → preview locale → vérification HTTP 200
     (liée au hash) → fait ``delivered`` → **écriture mémoire minimale** (T5, depuis l'app uniquement). Ne s'exécute
     qu'après un arc **réussi** (``awaiting``/``governance``). Renvoie un résumé, ou ``None`` si non applicable."""
@@ -450,7 +451,13 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Opti
                 "gate_fingerprint": current_fp, "significant_construction": False}
     # (7) USER GO valide pour le fingerprint MATÉRIEL courant → construction significative réelle autorisée.
 
-    delivery_caps = providers.real_delivery()                     # site_build + preview, résolus via le registre
+    # L9 — BuildProvider **opt-in** : ``build_provider`` (sélecteur OPAQUE) transmis tel quel à l'infrastructure
+    # (résolution des noms de fournisseur UNIQUEMENT dans providers.py, I9 — ce module n'en connaît aucun).
+    # ``None`` ⇒ appel **strictement historique** ``real_delivery()`` (défaut résolu par l'infrastructure, chemin
+    # inchangé) ; sinon sélection explicite (provider inconnu ⇒ ``LookupError`` fail-closed, aucun fallback). Ce
+    # sélecteur ne contourne JAMAIS le verrou ci-dessus.
+    delivery_caps = (providers.real_delivery() if build_provider is None
+                     else providers.real_delivery(build_provider=build_provider))   # site_build (+ preview)
     # Budget **gouverné** (RS-047) : env > défaut, source tracée ; ``budget_usd`` (réalisation) borne le plafond.
     budget_cfg = load_delivery_budget()
     ceiling = min(float(budget_usd), budget_cfg.ceiling_usd) if budget_usd else budget_cfg.ceiling_usd
@@ -484,11 +491,17 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float) -> Opti
 
 
 def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
-            actor: Any = None) -> Dict[str, Any]:
+            actor: Any = None, build_provider: Optional[str] = None) -> Dict[str, Any]:
     """**Confirmation humaine** : poursuit la **même** Pursuit vers l'arc. Le besoin (``matured_need``) est relu
     **côté moteur** depuis les tours ; l'UI n'en fournit aucun. ``actor`` = identité **déclarée** (non vérifiée)
     à l'origine de la confirmation ; enregistrée comme fait ``convergence_confirmed`` séparé (D3). En mode
-    **réel**, un arc réussi enchaîne la **livraison réelle** (build → preview → vérification → ``delivered``)."""
+    **réel**, un arc réussi enchaîne la **livraison réelle** (build → preview → vérification → ``delivered``).
+
+    L9 : ``build_provider`` est un **sélecteur opaque** du BuildProvider de ``build.site`` — transmis tel quel à
+    ``_deliver`` puis à l'infrastructure (résolution des noms UNIQUEMENT dans :mod:`brainai_app.providers`, I9).
+    ``None`` ⇒ **défaut historique** résolu par l'infrastructure (comportement inchangé ; ce module ne connaît
+    aucun nom de fournisseur, I9) ; provider inconnu ⇒ ``LookupError`` fail-closed (aucun fallback silencieux).
+    N'affecte **jamais** le verrou USER GO / Cost Gate de ``_deliver``."""
     caps = _capabilities(mode)
     root = _session_dir(pursuit_ref)
     ctx = _session_context(root, budget_usd=budget_usd)
@@ -500,7 +513,7 @@ def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
     _remember(outcome.pursuit_id, root)
     vm = to_viewmodel(outcome, need=None, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
     if mode == "real" and outcome.state == "awaiting" and outcome.wait_reason == "governance":
-        delivery = _deliver(root, outcome, actor=actor, budget_usd=budget_usd)
+        delivery = _deliver(root, outcome, actor=actor, budget_usd=budget_usd, build_provider=build_provider)
         if delivery is not None:
             vm["delivery"] = delivery
     return vm
