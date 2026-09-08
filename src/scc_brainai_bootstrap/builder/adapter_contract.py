@@ -180,6 +180,25 @@ def local_surface_contract(*, capability: str) -> AdapterContract:
     )
 
 
+def local_build_contract(*, capability: str) -> AdapterContract:
+    """Contrat d'un **BuildProvider local déterministe** (L9) : **aucun** fournisseur externe, **aucun** LLM,
+    **aucun** réseau, **aucun** subprocess — BrainAI écrit lui-même l'artefact dans le Workspace confiné. Distinct
+    de :func:`local_surface_contract` (preview loopback) : c'est une capacité de **construction** (écriture
+    confinée) et non une surface de service. Coût ``unavailable`` (I6 : rien de facturable, jamais fabriqué) ;
+    plafond natif ``none`` (aucun coût à borner) ; confinement Workspace (``resolve_within``), aucun outil
+    fournisseur (BrainAI écrit directement)."""
+    return AdapterContract(
+        capabilities_served=(capability,),
+        auth_channel={"kind": "none", "explicit": True, "leaks_identity": False,
+                      "detail": "construction locale déterministe — aucun fournisseur externe"},
+        inbound_channels=(),
+        cost_report={"mode": "unavailable", "fabricated": False},
+        native_budget={"usd_cap": "none", "call_cap": "none"},
+        confinement={"workspace": True, "tools_allowed": [], "tools_disallowed": [],
+                     "permission_mode": "local+confined", "env_mode": "none"},
+    )
+
+
 __all__ = ["AdapterContract", "IncompleteContractError", "validate_contract", "is_conformant", "require_contract",
-           "claude_text_contract", "claude_site_contract", "local_surface_contract",
+           "claude_text_contract", "claude_site_contract", "local_surface_contract", "local_build_contract",
            "COST_MODES", "USD_CAP_KINDS", "CALL_CAP_KINDS"]

@@ -123,7 +123,19 @@ class _Handler(BaseHTTPRequestHandler):
                 pursuit_ref = str(payload.get("pursuit_ref") or "").strip()
                 if not pursuit_ref:
                     self._send_json(400, {"error": "champ 'pursuit_ref' requis (non vide)"}); return
-                data = realize(pursuit_ref, mode=mode)
+                # L9 — BuildProvider **opt-in** : MÊME endpoint/pipeline. Validation de **forme** seulement (chaîne
+                # non vide) ; ``.strip()`` sert UNIQUEMENT à ce contrôle — la valeur ORIGINALE est transmise
+                # **inchangée** (aucune normalisation silencieuse). Le serveur ne résout AUCUN nom (I9) : sémantique
+                # et appartenance à ``BUILD_PROVIDERS`` restent dans providers.py. Provider inconnu ⇒ 400 fail-closed.
+                build_provider = payload.get("build_provider")
+                if build_provider is not None and (
+                    not isinstance(build_provider, str) or not build_provider.strip()
+                ):
+                    self._send_json(400, {"error": "champ 'build_provider' invalide (chaîne non vide)"}); return
+                try:
+                    data = realize(pursuit_ref, mode=mode, build_provider=build_provider)
+                except LookupError as exc:                # BuildProvider inconnu (résolu fail-closed dans providers.py)
+                    self._send_json(400, {"error": f"fournisseur inconnu : {exc}"}); return
             elif kind == "authorize":
                 # L8 — USER GO (ou refus) du Cost Gate : MÊME endpoint/pipeline, un genre d'intention de plus.
                 # Validation de **forme** ici (fail-closed, TYPE strict : jamais de coercition silencieuse d'un type

@@ -24,6 +24,7 @@ from scc_brainai_bootstrap.builder.conversation import ClaudeCodeConversationAda
 from scc_brainai_bootstrap.builder.gemini_understanding import GeminiUnderstandingAdapter
 from scc_brainai_bootstrap.builder.openai_understanding import OpenAIUnderstandingAdapter
 from scc_brainai_bootstrap.builder.site import ClaudeCodeSiteAdapter
+from scc_brainai_bootstrap.builder.local_site import LocalDeterministicSiteAdapter, PROVIDER_NAME as LOCAL_BUILDER
 from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationAdapter
 from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
 from scc_brainai_bootstrap.core.config import BrainAIConfig
@@ -57,6 +58,11 @@ OPENAI = "openai"
 GEMINI = "gemini"
 # Fournisseurs de cognition **admis** pour la sélection explicite (fail-closed hors de cet ensemble).
 COGNITION_PROVIDERS = (CLAUDE_CODE, OPENAI, GEMINI)
+
+# L9 — **BuildProviders** admis pour la capacité d'exécution ``build.site`` (construction réelle). ``claude_code``
+# reste le **défaut historique** (inchangé) ; ``deterministic_local`` (:data:`LOCAL_BUILDER`) est un 2ᵉ exécutant
+# **explicitement sélectionnable** (jamais un fallback automatique). Fail-closed hors de cet ensemble.
+BUILD_PROVIDERS = (CLAUDE_CODE, LOCAL_BUILDER)
 
 # Ordre des capacités → champ de :class:`Capabilities`.
 _CAPABILITY_TO_FIELD = {UNDERSTAND_NEED: "understanding", SPECIFY: "specification",
@@ -316,16 +322,67 @@ def resolve_delivery(descriptors: List[AgentDescriptor],
     return DeliveryCapabilities(site_build=site_build, preview=preview)
 
 
-def real_delivery() -> DeliveryCapabilities:
-    """Capacités de livraison **réelles** (site facturable + preview locale), par résolution de capacités."""
-    return resolve_delivery(delivery_descriptors(), delivery_binders())
+# --------------------------------------------------------------------- #
+# L9 — INTERCHANGEABILITÉ RÉELLE du **BuildProvider** (capacité d'exécution ``build.site``).
+# Sélection EXPLICITE d'un exécutant derrière la MÊME capacité, via le MÊME registre — aucun fan-out, aucun
+# fallback automatique. Le défaut reste ``claude_code`` (inchangé). Miroir strict de ``resolve_understanding`` (L6A).
+# --------------------------------------------------------------------- #
+def build_site_descriptors(provider: str = CLAUDE_CODE) -> List[AgentDescriptor]:
+    """Descriptor de la capacité ``build.site`` pour un **BuildProvider explicite** admis
+    (:data:`BUILD_PROVIDERS` : ``claude_code`` / ``deterministic_local``). Changer ``provider`` **substitue**
+    l'exécutant par simple résolution (aucun code métier touché)."""
+    return [
+        AgentDescriptor(id=f"brainai.{provider}.{BUILD_SITE.replace('.', '_')}", namespace="brainai",
+                        name=f"{provider}:{BUILD_SITE}", capabilities=[BUILD_SITE], state=AgentState.ACTIVE,
+                        provider=provider, availability="available", cost=None, priority=0),
+    ]
+
+
+def build_site_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
+    """Binder ``(BuildProvider, build.site) → fabrique`` pour les exécutants admis. ``claude_code`` : adaptateur
+    Claude Code (haiku, plafond 0,50 $, watchdog gouverné) — **inchangé**. ``deterministic_local`` : exécutant
+    local déterministe (aucun LLM/réseau/subprocess, coût ``unavailable``)."""
+    wd = load_call_watchdog().timeout_s
+    return {
+        (CLAUDE_CODE, BUILD_SITE): lambda: ClaudeCodeSiteAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
+        (LOCAL_BUILDER, BUILD_SITE): lambda: LocalDeterministicSiteAdapter(),
+    }
+
+
+def resolve_build_site(provider: str = CLAUDE_CODE) -> Any:
+    """Résout la capacité ``build.site`` vers l'exécutant du **BuildProvider explicite** demandé, via le registre
+    (l'appelant ne connaît jamais le provider). **Fail-closed** : un provider hors :data:`BUILD_PROVIDERS` est
+    refusé **sans résolution** (``LookupError``) — **aucun fallback silencieux**. Rejet structurel T2 (contrat
+    complet) via ``require_contract``. Ne réalise **aucune** construction : retourne l'adaptateur invocable."""
+    if provider not in BUILD_PROVIDERS:
+        raise LookupError(f"BuildProvider inconnu : {provider!r} (attendu ∈ {BUILD_PROVIDERS})")
+    impl = resolve_capability(BUILD_SITE, build_site_descriptors(provider), build_site_binders())
+    require_contract(impl)                          # contrat d'adaptateur complet exigé (T2) — quel que soit le provider
+    return impl
+
+
+def real_delivery(build_provider: Optional[str] = None) -> DeliveryCapabilities:
+    """Capacités de livraison **réelles** (site + preview locale). ``build_provider`` = **sélecteur opaque** L9 du
+    BuildProvider de ``build.site`` :
+    - **absent** (``None``) ⇒ chemin **historique strictement inchangé** (défaut ``claude_code``) ;
+    - **1 nom admis** ⇒ sélection **explicite** de cet exécutant (jamais remplacé, **aucun fallback**) ;
+    - **nom hors** :data:`BUILD_PROVIDERS` ⇒ ``LookupError`` (fail-closed).
+    La preview reste ``local_loopback`` dans tous les cas."""
+    if build_provider is None:
+        return resolve_delivery(delivery_descriptors(), delivery_binders())    # historique inchangé
+    site_build = resolve_build_site(build_provider)                            # sélection explicite (fail-closed)
+    preview = resolve_capability(PREVIEW_LOCAL, delivery_descriptors(), delivery_binders())
+    require_contract(preview)
+    return DeliveryCapabilities(site_build=site_build, preview=preview)
 
 
 __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
            "OPENAI", "GEMINI", "COGNITION_PROVIDERS",
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
+           "LOCAL_BUILDER", "BUILD_PROVIDERS",
            "default_descriptors", "default_binders", "resolve_capability", "resolve_capabilities",
            "real_capabilities", "understanding_descriptors", "understanding_binders", "resolve_understanding",
            "resolve_understanding_cohort",
            "DeliveryCapabilities", "delivery_descriptors", "delivery_binders",
-           "deferred_deploy_public_descriptor", "resolve_delivery", "real_delivery"]
+           "deferred_deploy_public_descriptor", "resolve_delivery", "real_delivery",
+           "build_site_descriptors", "build_site_binders", "resolve_build_site"]
