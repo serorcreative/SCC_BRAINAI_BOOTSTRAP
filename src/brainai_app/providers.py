@@ -25,6 +25,9 @@ from scc_brainai_bootstrap.builder.gemini_understanding import GeminiUnderstandi
 from scc_brainai_bootstrap.builder.openai_understanding import OpenAIUnderstandingAdapter
 from scc_brainai_bootstrap.builder.site import ClaudeCodeSiteAdapter
 from scc_brainai_bootstrap.builder.local_site import LocalDeterministicSiteAdapter, PROVIDER_NAME as LOCAL_BUILDER
+from scc_brainai_bootstrap.builder.git_read import (
+    LocalGitReadAdapter, GitReadHandle, PROVIDER_NAME as LOCAL_GIT,
+    GIT_STATUS, GIT_DIFF, GIT_BRANCHES, GIT_READ_CAPABILITIES)
 from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationAdapter
 from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
 from scc_brainai_bootstrap.core.config import BrainAIConfig
@@ -63,6 +66,10 @@ COGNITION_PROVIDERS = (CLAUDE_CODE, OPENAI, GEMINI)
 # reste le **défaut historique** (inchangé) ; ``deterministic_local`` (:data:`LOCAL_BUILDER`) est un 2ᵉ exécutant
 # **explicitement sélectionnable** (jamais un fallback automatique). Fail-closed hors de cet ensemble.
 BUILD_PROVIDERS = (CLAUDE_CODE, LOCAL_BUILDER)
+
+# L10.1 — GitReadProviders admis pour les capacités de LECTURE git (classe R). ``local_git`` : exécutant local
+# déterministe (aucune remote, aucune credential ; network_required=false). Fail-closed hors de cet ensemble.
+GIT_READ_PROVIDERS = (LOCAL_GIT,)
 
 # Ordre des capacités → champ de :class:`Capabilities`.
 _CAPABILITY_TO_FIELD = {UNDERSTAND_NEED: "understanding", SPECIFY: "specification",
@@ -376,6 +383,44 @@ def real_delivery(build_provider: Optional[str] = None) -> DeliveryCapabilities:
     return DeliveryCapabilities(site_build=site_build, preview=preview)
 
 
+# --------------------------------------------------------------------- #
+# L10.1 — Capacités Git en LECTURE SEULE (classe R). Résolution EXPLICITE via le MÊME registre (I9 : les noms
+# d'exécutant ne vivent qu'ici). Aucune mutation, aucune remote. Miroir strict de ``resolve_build_site`` (L9).
+# --------------------------------------------------------------------- #
+def git_read_descriptors(provider: str = LOCAL_GIT, capability: str = GIT_STATUS) -> List[AgentDescriptor]:
+    """Descriptor d'une capacité git-read (``git.status`` / ``git.diff`` / ``git.branches.list``) pour un
+    GitReadProvider admis. Un descriptor = une capacité (résolution par ``(provider, capability)``)."""
+    return [
+        AgentDescriptor(id=f"brainai.{provider}.{capability.replace('.', '_')}", namespace="brainai",
+                        name=f"{provider}:{capability}", capabilities=[capability], state=AgentState.ACTIVE,
+                        provider=provider, availability="available", cost=None, priority=0),
+    ]
+
+
+def git_read_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
+    """Binder ``(GitReadProvider, capacité) → fabrique`` pour les trois lectures git. ``local_git`` : exécutant
+    local déterministe (aucun LLM/réseau/credential, coût ``unavailable``)."""
+    return {
+        (LOCAL_GIT, GIT_STATUS): lambda: LocalGitReadAdapter(),
+        (LOCAL_GIT, GIT_DIFF): lambda: LocalGitReadAdapter(),
+        (LOCAL_GIT, GIT_BRANCHES): lambda: LocalGitReadAdapter(),
+    }
+
+
+def resolve_git_read(capability: str, provider: str = LOCAL_GIT) -> GitReadHandle:
+    """Résout une capacité git-read (classe R) et renvoie un :class:`~scc_brainai_bootstrap.builder.git_read.GitReadHandle`
+    — **voie d'exécution publique unique** (F-6.1) : jamais l'adaptateur exécutable nu. **Fail-closed** : provider
+    hors :data:`GIT_READ_PROVIDERS` **ou** capacité hors :data:`GIT_READ_CAPABILITIES` ⇒ ``LookupError`` (aucun
+    fallback). Rejet structurel T2 via ``require_contract`` sur l'implémentation interne **avant** wrapping."""
+    if provider not in GIT_READ_PROVIDERS:
+        raise LookupError(f"GitReadProvider inconnu : {provider!r} (attendu ∈ {GIT_READ_PROVIDERS})")
+    if capability not in GIT_READ_CAPABILITIES:
+        raise LookupError(f"capacité git-read inconnue : {capability!r} (attendu ∈ {GIT_READ_CAPABILITIES})")
+    impl = resolve_capability(capability, git_read_descriptors(provider, capability), git_read_binders())
+    require_contract(impl)                          # T2 exigé AVANT wrapping (sur l'implémentation interne)
+    return GitReadHandle(impl, capability)          # F-6.1 : voie publique = handle (read), jamais l'adaptateur nu
+
+
 __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
            "OPENAI", "GEMINI", "COGNITION_PROVIDERS",
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
@@ -385,4 +430,6 @@ __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILI
            "resolve_understanding_cohort",
            "DeliveryCapabilities", "delivery_descriptors", "delivery_binders",
            "deferred_deploy_public_descriptor", "resolve_delivery", "real_delivery",
-           "build_site_descriptors", "build_site_binders", "resolve_build_site"]
+           "build_site_descriptors", "build_site_binders", "resolve_build_site",
+           "LOCAL_GIT", "GIT_READ_PROVIDERS", "GIT_STATUS", "GIT_DIFF", "GIT_BRANCHES", "GIT_READ_CAPABILITIES",
+           "git_read_descriptors", "git_read_binders", "resolve_git_read"]
