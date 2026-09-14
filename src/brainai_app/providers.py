@@ -28,6 +28,9 @@ from scc_brainai_bootstrap.builder.local_site import LocalDeterministicSiteAdapt
 from scc_brainai_bootstrap.builder.git_read import (
     LocalGitReadAdapter, GitReadHandle, PROVIDER_NAME as LOCAL_GIT,
     GIT_STATUS, GIT_DIFF, GIT_BRANCHES, GIT_READ_CAPABILITIES)
+from scc_brainai_bootstrap.builder.git_write import (
+    LocalGitWriteAdapter, GitWriteHandle,
+    GIT_BRANCH_CREATE, GIT_COMMIT, GIT_WRITE_CAPABILITIES)
 from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationAdapter
 from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
 from scc_brainai_bootstrap.core.config import BrainAIConfig
@@ -421,6 +424,48 @@ def resolve_git_read(capability: str, provider: str = LOCAL_GIT) -> GitReadHandl
     return GitReadHandle(impl, capability)          # F-6.1 : voie publique = handle (read), jamais l'adaptateur nu
 
 
+# --------------------------------------------------------------------- #
+# L10.2 — Capacités Git en MUTATION LOCALE (classe M). Résolution EXPLICITE via le MÊME registre (I9 : les noms
+# d'exécutant ne vivent qu'ici). Miroir strict de resolve_git_read (L10.1) ; provider unique local_git ; le handle
+# renvoyé est la voie publique unique (F-6.1), le gate N2 vit dans produce_git_write (jamais contournable ici).
+# --------------------------------------------------------------------- #
+GIT_WRITE_PROVIDERS = (LOCAL_GIT,)
+
+
+def git_write_descriptors(provider: str = LOCAL_GIT, capability: str = GIT_BRANCH_CREATE) -> List[AgentDescriptor]:
+    """Descriptor d'une capacité git-write (``git.branch.create`` / ``git.commit``) pour un GitWriteProvider admis.
+    Un descriptor = une capacité (résolution par ``(provider, capability)``)."""
+    return [
+        AgentDescriptor(id=f"brainai.{provider}.{capability.replace('.', '_')}", namespace="brainai",
+                        name=f"{provider}:{capability}", capabilities=[capability], state=AgentState.ACTIVE,
+                        provider=provider, availability="available", cost=None, priority=0),
+    ]
+
+
+def git_write_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
+    """Binder ``(GitWriteProvider, capacité) → fabrique`` pour les deux mutations git locales. ``local_git`` :
+    exécutant local déterministe (aucun LLM/réseau/credential ; gate N2 gouverne toute mutation dans le seam)."""
+    return {
+        (LOCAL_GIT, GIT_BRANCH_CREATE): lambda: LocalGitWriteAdapter(),
+        (LOCAL_GIT, GIT_COMMIT): lambda: LocalGitWriteAdapter(),
+    }
+
+
+def resolve_git_write(capability: str, provider: str = LOCAL_GIT) -> GitWriteHandle:
+    """Résout une capacité git-write (classe M) et renvoie un
+    :class:`~scc_brainai_bootstrap.builder.git_write.GitWriteHandle` — **voie d'exécution publique unique** (F-6.1) :
+    jamais l'adaptateur mutant nu. **Fail-closed** : provider hors :data:`GIT_WRITE_PROVIDERS` **ou** capacité hors
+    :data:`GIT_WRITE_CAPABILITIES` ⇒ ``LookupError`` (aucun fallback). Rejet structurel T2 via ``require_contract``
+    sur l'implémentation interne **avant** wrapping. Le gate N2 est appliqué dans ``produce_git_write`` (seam)."""
+    if provider not in GIT_WRITE_PROVIDERS:
+        raise LookupError(f"GitWriteProvider inconnu : {provider!r} (attendu ∈ {GIT_WRITE_PROVIDERS})")
+    if capability not in GIT_WRITE_CAPABILITIES:
+        raise LookupError(f"capacité git-write inconnue : {capability!r} (attendu ∈ {GIT_WRITE_CAPABILITIES})")
+    impl = resolve_capability(capability, git_write_descriptors(provider, capability), git_write_binders())
+    require_contract(impl)                          # T2 exigé AVANT wrapping (sur l'implémentation interne)
+    return GitWriteHandle(impl, capability)          # F-6.1 : voie publique = handle (write), jamais l'adaptateur nu
+
+
 __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
            "OPENAI", "GEMINI", "COGNITION_PROVIDERS",
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
@@ -432,4 +477,6 @@ __all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILI
            "deferred_deploy_public_descriptor", "resolve_delivery", "real_delivery",
            "build_site_descriptors", "build_site_binders", "resolve_build_site",
            "LOCAL_GIT", "GIT_READ_PROVIDERS", "GIT_STATUS", "GIT_DIFF", "GIT_BRANCHES", "GIT_READ_CAPABILITIES",
-           "git_read_descriptors", "git_read_binders", "resolve_git_read"]
+           "git_read_descriptors", "git_read_binders", "resolve_git_read",
+           "GIT_WRITE_PROVIDERS", "GIT_BRANCH_CREATE", "GIT_COMMIT", "GIT_WRITE_CAPABILITIES",
+           "git_write_descriptors", "git_write_binders", "resolve_git_write"]
