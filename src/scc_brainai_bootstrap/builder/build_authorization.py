@@ -238,9 +238,12 @@ def build_authorization_fact(*, pursuit_ref: str, spec_ref: str, architecture_re
 
 
 class BuildAuthorizationStore:
-    """Journal **append-only** des autorisations de build (fichier injecté, hors ``data/``). Id
-    **content-addressed**, ``as_of`` figé ; lecture **fail-closed** (ligne illisible lève). Inerte. Aucune mémoire
-    parallèle."""
+    """Journal **append-only** de gouvernance partagé (fichier injecté, hors ``data/``) : autorisations de build L8
+    (``build_authorization``), autorisations de mutation git L10.2 (``git_mutation_authorization``) **et** provenance
+    durable de mutation git (``git_mutation_provenance``) — chaque type distingué par ``fact_type`` et lu par sa
+    primitive dédiée. Id **content-addressed** (assigné ici, ``authorization_id``), ``as_of`` figé ; lecture
+    **fail-closed** (ligne illisible lève). Inerte (record ≠ exécution). Aucune mémoire parallèle. **Logique
+    inchangée** : ``record()``/``read_all()`` restent strictement identiques (aucun consommateur existant impacté)."""
 
     def __init__(self, path: Path):
         self._path = Path(path)
@@ -376,6 +379,179 @@ def authorization_status(store: Any, *, pursuit_ref: str, gate_fingerprint: str)
     return latest["decision"]
 
 
+# --------------------------------------------------------------------- #
+# L10.2 — Autorisation de mutation Git locale (additive, fact_type dédié). CONNECTER, PAS RECONSTRUIRE :
+# réutilise le MÊME journal append-only (BuildAuthorizationStore) et le MÊME patron inerte/fail-closed, mais un
+# fact_type distinct (git_mutation_authorization) et un lecteur dédié. authorization_status (L8) reste inchangé.
+# --------------------------------------------------------------------- #
+GIT_MUTATION_FACT_TYPE = "git_mutation_authorization"
+GIT_MUTATION_CAPABILITIES = ("git.branch.create", "git.commit")
+
+
+def git_mutation_authorization_fact(*, pursuit_ref: str, gate_fingerprint: str, decision: str, as_of: str,
+                                    actor: Any = None, capability: Optional[str] = None,
+                                    commentary: Optional[str] = None) -> Dict[str, Any]:
+    """Fait ``git_mutation_authorization`` immuable et **inerte** (record ≠ exécution). Lie une mutation Git locale
+    matérielle (empreinte ``gate_fingerprint`` calculée par ``git_write``) à une pursuit, acteur déclaré/non vérifié.
+    ``decision`` ∈ :data:`DECISIONS`. ``capability`` descriptive **enregistrée** ; si fournie : chaîne non vide ∈
+    :data:`GIT_MUTATION_CAPABILITIES` (fail-closed). Ne déclenche rien."""
+    if decision not in DECISIONS:
+        raise ValueError(
+            f"décision invalide : {decision!r} (attendu ∈ {DECISIONS})"
+        )
+
+    if not isinstance(pursuit_ref, str) or not pursuit_ref.strip():
+        raise ValueError(
+            "git_mutation_authorization_fact : pursuit_ref "
+            "(chaîne non vide) requis (fail-closed)"
+        )
+
+    if not isinstance(gate_fingerprint, str) or not gate_fingerprint.strip():
+        raise ValueError(
+            "git_mutation_authorization_fact : gate_fingerprint "
+            "(chaîne non vide) requis (fail-closed)"
+        )
+
+    if capability is not None:
+        if (
+            not isinstance(capability, str)
+            or capability not in GIT_MUTATION_CAPABILITIES
+        ):
+            raise ValueError(
+                f"git_mutation_authorization_fact : capability invalide "
+                f"{capability!r} "
+                f"(attendu ∈ {GIT_MUTATION_CAPABILITIES}) "
+                "(fail-closed)"
+            )
+
+    return {
+        "fact_type": GIT_MUTATION_FACT_TYPE,
+        "pursuit_ref": pursuit_ref,
+        "gate_fingerprint": gate_fingerprint,
+        "capability": capability,
+        "decision": decision,
+        "actor": declared_actor(actor),
+        "commentary": commentary,
+        "as_of": as_of,
+    }
+
+
+def git_mutation_authorization_record(store: Any, *, pursuit_ref: str,
+                                      gate_fingerprint: str) -> Optional[Dict[str, Any]]:
+    """Fait d'autorisation git-mutation **le plus récent** portant EXACTEMENT ``fact_type ==
+    "git_mutation_authorization"`` + ``pursuit_ref`` + ``gate_fingerprint`` + ``decision`` valide, sinon ``None``
+    (fail-closed : ``store`` ``None`` / aucun fait exact ⇒ ``None`` ⇒ NO GO = NO MUTATION). Décision la plus récente
+    par ``(as_of, authorization_id)``. **Ne lit jamais** un ``build_authorization``."""
+    if store is None:
+        return None
+    matching = [f for f in store.read_all()
+                if f.get("fact_type") == GIT_MUTATION_FACT_TYPE
+                and f.get("pursuit_ref") == pursuit_ref
+                and f.get("gate_fingerprint") == gate_fingerprint
+                and f.get("decision") in DECISIONS]
+    if not matching:
+        return None
+    return max(matching, key=lambda f: (str(f.get("as_of") or ""), str(f.get("authorization_id") or "")))
+
+
+def git_mutation_authorization_status(store: Any, *, pursuit_ref: str, gate_fingerprint: str) -> str:
+    """Façade chaîne : ``"approved"`` / ``"declined"`` / ``"none"`` (fail-closed) — exclusivement sur
+    ``git_mutation_authorization``."""
+    rec = git_mutation_authorization_record(store, pursuit_ref=pursuit_ref, gate_fingerprint=gate_fingerprint)
+    return rec["decision"] if rec else "none"
+
+
+# --------------------------------------------------------------------- #
+# L10.2 (F-D3-1) — Provenance DURABLE d'une mutation git : corrèle, dans le MÊME journal append-only, le fait
+# ToolInvocation (``invocation_ref``) à l'autorisation consommée (``authorization_ref`` = ``authorization_id`` du
+# fait ``git_mutation_authorization`` approuvé + ``gate_fingerprint``/``pursuit_ref``/``decision``) et à l'issue
+# (``outcome``). Fact_type distinct ⇒ n'interfère NI avec ``authorization_status`` (L8) NI avec le reader
+# d'autorisation git. Inerte (record ≠ exécution). Secret-safe : ne porte que des références/empreintes, jamais de
+# contenu brut ni de texte libre.
+# --------------------------------------------------------------------- #
+GIT_MUTATION_PROVENANCE_FACT_TYPE = "git_mutation_provenance"
+# Issues distinctes. ``refused`` = AVANT toute mutation (aucun GO valide). Toutes les autres surviennent APRÈS un
+# GO approuvé et EXIGENT donc la corrélation d'autorisation.
+GIT_MUTATION_OUTCOMES = ("refused", "failed_rolled_back", "failed_dirty_index",
+                         "branch_created", "postcondition_failed_branch_created",
+                         "commit_created", "postcondition_failed_commit_created")
+_GIT_MUTATION_PRE_GATE_OUTCOMES = ("refused",)
+
+
+def git_mutation_provenance_fact(*, invocation_ref: str, pursuit_ref: str, gate_fingerprint: str,
+                                 capability: str, outcome: str, as_of: str,
+                                 authorization_ref: Optional[str] = None, decision: Optional[str] = None,
+                                 authorization_as_of: Optional[str] = None, actor: Any = None) -> Dict[str, Any]:
+    """Fait ``git_mutation_provenance`` immuable corrélant une mutation git à son autorisation et à son issue.
+
+    Fail-closed :
+    - ``invocation_ref``/``pursuit_ref``/``gate_fingerprint``/``outcome``/``capability``/``as_of`` : chaînes non vides ;
+    - ``outcome`` ∈ :data:`GIT_MUTATION_OUTCOMES` ; ``capability`` ∈ :data:`GIT_MUTATION_CAPABILITIES` ;
+    - **outcome POST-GO** (tout sauf ``refused``) : ``authorization_ref`` (= ``authorization_id`` du fait
+      ``git_mutation_authorization`` consommé, chaîne non vide) + ``decision == "approved"`` + ``authorization_as_of``
+      (chaîne non vide) OBLIGATOIRES — jamais de mutation tracée sans GO approuvé ;
+    - **outcome ``refused``** : ``authorization_ref``/``decision``/``authorization_as_of`` DOIVENT être ``None``
+      (aucune autorisation consommée)."""
+    for field, val in (("invocation_ref", invocation_ref), ("pursuit_ref", pursuit_ref),
+                       ("gate_fingerprint", gate_fingerprint), ("outcome", outcome),
+                       ("capability", capability), ("as_of", as_of)):
+        if not isinstance(val, str) or not val.strip():
+            raise ValueError(f"git_mutation_provenance_fact : {field} (chaîne non vide) requis (fail-closed)")
+    if outcome not in GIT_MUTATION_OUTCOMES:
+        raise ValueError(f"outcome invalide : {outcome!r} (attendu ∈ {GIT_MUTATION_OUTCOMES}) (fail-closed)")
+    if capability not in GIT_MUTATION_CAPABILITIES:
+        raise ValueError(f"capability invalide : {capability!r} (attendu ∈ {GIT_MUTATION_CAPABILITIES})")
+    if outcome in _GIT_MUTATION_PRE_GATE_OUTCOMES:
+        if authorization_ref is not None or decision is not None or authorization_as_of is not None:
+            raise ValueError("outcome 'refused' : aucune autorisation ne doit être référencée (fail-closed)")
+    else:
+        if not isinstance(authorization_ref, str) or not authorization_ref.strip():
+            raise ValueError(f"outcome {outcome!r} (post-GO) exige authorization_ref "
+                             "(= authorization_id du fait git_mutation_authorization consommé) (fail-closed)")
+        if decision != "approved":
+            raise ValueError(f"outcome {outcome!r} (post-GO) exige decision='approved' (fail-closed)")
+        if not isinstance(authorization_as_of, str) or not authorization_as_of.strip():
+            raise ValueError(f"outcome {outcome!r} (post-GO) exige authorization_as_of (fail-closed)")
+    return {
+        "fact_type": GIT_MUTATION_PROVENANCE_FACT_TYPE,
+        "invocation_ref": invocation_ref,
+        "pursuit_ref": pursuit_ref,
+        "gate_fingerprint": gate_fingerprint,
+        "capability": capability,
+        "outcome": outcome,
+        "authorization_ref": authorization_ref,         # = authorization_id du fait d'autorisation consommé
+        "decision": decision,
+        "authorization_as_of": authorization_as_of,
+        "actor": declared_actor(actor),
+        "as_of": as_of,
+    }
+
+
+def git_mutation_provenance_records(store: Any, *, pursuit_ref: Optional[str] = None,
+                                    gate_fingerprint: Optional[str] = None,
+                                    invocation_ref: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Faits ``git_mutation_provenance`` (durables) filtrés fail-closed sur ``fact_type`` + éventuels
+    ``pursuit_ref``/``gate_fingerprint``/``invocation_ref``, triés par ``(as_of, authorization_id)`` où
+    ``authorization_id`` est l'**id propre DU FAIT DE PROVENANCE** (assigné content-addressed par
+    :meth:`BuildAuthorizationStore.record`), à ne pas confondre avec ``authorization_ref`` (l'``authorization_id`` du
+    fait ``git_mutation_authorization`` consommé). ``store`` ``None`` ⇒ ``[]``. **Ne lit jamais** un
+    ``build_authorization`` ni un ``git_mutation_authorization``."""
+    if store is None:
+        return []
+    out = [f for f in store.read_all() if f.get("fact_type") == GIT_MUTATION_PROVENANCE_FACT_TYPE]
+    if pursuit_ref is not None:
+        out = [f for f in out if f.get("pursuit_ref") == pursuit_ref]
+    if gate_fingerprint is not None:
+        out = [f for f in out if f.get("gate_fingerprint") == gate_fingerprint]
+    if invocation_ref is not None:
+        out = [f for f in out if f.get("invocation_ref") == invocation_ref]
+    return sorted(out, key=lambda f: (str(f.get("as_of") or ""), str(f.get("authorization_id") or "")))
+
+
 __all__ = ["DECISIONS", "canonical_material_assumptions", "gate_fingerprint",
            "build_authorization_fact", "BuildAuthorizationStore", "authorization_status",
-           "resolve_cost_gate"]
+           "resolve_cost_gate",
+           "GIT_MUTATION_FACT_TYPE", "GIT_MUTATION_CAPABILITIES", "git_mutation_authorization_fact",
+           "git_mutation_authorization_record", "git_mutation_authorization_status",
+           "GIT_MUTATION_PROVENANCE_FACT_TYPE", "GIT_MUTATION_OUTCOMES", "git_mutation_provenance_fact",
+           "git_mutation_provenance_records"]
