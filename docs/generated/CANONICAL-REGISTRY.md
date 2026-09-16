@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 156
+- **Entrées totales** : 157
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -20,17 +20,17 @@
 | doctrine | 30 |
 | evolution_record | 62 |
 | invariant | 5 |
-| milestone | 12 |
+| milestone | 13 |
 | ratification | 1 |
 
 ## Catégories de preuve utilisées (calculé)
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 140 |
+| source_evidence | 141 |
 | artifact_evidence | 5 |
-| test_evidence | 11 |
-| runtime_evidence | 11 |
+| test_evidence | 12 |
+| runtime_evidence | 12 |
 
 | Par migration_state | n |
 |---|---|
@@ -110,6 +110,7 @@
 | `MILESTONE-CI-OPTION-A-21-21-PASS-2026-08-26` | milestone | CI Option A — topologie patrimoniale 21/21 validée sur GitHub | ci_option_a_github_pass | — | — | runtime |
 | `MILESTONE-L0-PROVISIONAL-CLOSURE-2026-08-24` | milestone | L0 — clôture provisoire du lot intégrité / source de vérité | provisionally_closed | — | — | artifact |
 | `MILESTONE-L10.1-TYPED-GIT-READ-CONTROL-2026-09-10` | milestone | L10.1 — Software Control Plane : capacités Git en LECTURE SEULE typées (classe R) — git… | merged | — | — | runtime |
+| `MILESTONE-L10.2-TYPED-GIT-WRITE-CONTROL-2026-09-14` | milestone | L10.2 — Software Control Plane : capacités Git en ÉCRITURE LOCALE gouvernée typées (cla… | merged | — | — | runtime |
 | `MILESTONE-L2-CLOSURE-2026-08-27` | milestone | L2 — clôture : store-safety / concurrence / vocabulaire (Memory-11 + Core 17 mergés, CI… | closed | — | — | runtime |
 | `MILESTONE-L3-PURSUIT-MEMORY11-CONTINUITY-2026-08-27` | milestone | L3 — continuité durable Pursuit → Memory-11 à la livraison (enrichissement additif, mer… | merged | — | — | runtime |
 | `MILESTONE-L4-PURSUIT-RETRIEVAL-2026-08-27` | milestone | L4 — rappel en lecture d'une Pursuit depuis Memory-11 (retrieve_pursuit ; premier chemi… | merged | — | — | runtime |
