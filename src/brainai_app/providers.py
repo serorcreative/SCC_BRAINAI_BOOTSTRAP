@@ -33,6 +33,9 @@ from scc_brainai_bootstrap.builder.git_write import (
     GIT_BRANCH_CREATE, GIT_COMMIT, GIT_WRITE_CAPABILITIES)
 from scc_brainai_bootstrap.builder.specification import ClaudeCodeSpecificationAdapter
 from scc_brainai_bootstrap.builder.understanding import ClaudeCodeUnderstandingAdapter
+from scc_brainai_bootstrap.builder.observability_read import (
+    LocalControlPlaneReadAdapter, ObservabilityReadHandle, PROVIDER_NAME as LOCAL_CONTROL_PLANE,
+    OBS_HEALTH, OBSERVABILITY_READ_CAPABILITIES)
 from scc_brainai_bootstrap.core.config import BrainAIConfig
 from brainai_app.delivery.preview_capability import LocalPreviewAdapter
 from brainai_app.delivery.watchdog_config import load_call_watchdog
@@ -466,7 +469,46 @@ def resolve_git_write(capability: str, provider: str = LOCAL_GIT) -> GitWriteHan
     return GitWriteHandle(impl, capability)          # F-6.1 : voie publique = handle (write), jamais l'adaptateur nu
 
 
-__all__ = ["UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
+# --------------------------------------------------------------------- #
+# L10 (Variante MIN) — Capacité OBSERVABILITÉ en LECTURE SEULE (classe R). Résolution EXPLICITE via le MÊME
+# registre (I9 : les noms d'exécutant ne vivent qu'ici). CONNECTER, PAS RECONSTRUIRE : consomme la façade
+# existante 09_CONTROL_PLANE (INCHANGÉE). Miroir strict de resolve_git_read (L10.1). Aucune mutation, aucun réseau.
+# --------------------------------------------------------------------- #
+OBSERVABILITY_READ_PROVIDERS = (LOCAL_CONTROL_PLANE,)
+
+
+def observability_read_descriptors(provider: str = LOCAL_CONTROL_PLANE, capability: str = OBS_HEALTH) -> List[AgentDescriptor]:
+    """Descriptor de la capacité observability-read (``observability.health``) pour un provider admis. Un descriptor
+    = une capacité (résolution par ``(provider, capability)``)."""
+    return [
+        AgentDescriptor(id=f"brainai.{provider}.{capability.replace('.', '_')}", namespace="brainai",
+                        name=f"{provider}:{capability}", capabilities=[capability], state=AgentState.ACTIVE,
+                        provider=provider, availability="available", cost=None, priority=0),
+    ]
+
+
+def observability_read_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
+    """Binder ``(provider, capacité) → fabrique`` pour la lecture d'observabilité. ``local_control_plane`` :
+    exécutant local déterministe (aucun LLM/réseau/credential ; façade ControlPlane, adaptateur INERTE)."""
+    return {
+        (LOCAL_CONTROL_PLANE, OBS_HEALTH): lambda: LocalControlPlaneReadAdapter(),
+    }
+
+
+def resolve_observability_read(capability: str, provider: str = LOCAL_CONTROL_PLANE) -> ObservabilityReadHandle:
+    """Résout la capacité observability-read (classe R) et renvoie un ``ObservabilityReadHandle`` — voie d'exécution
+    publique unique (F-6.1) : jamais l'adaptateur nu. Fail-closed : provider hors OBSERVABILITY_READ_PROVIDERS OU
+    capacité hors OBSERVABILITY_READ_CAPABILITIES => LookupError (aucun fallback). require_contract avant wrapping."""
+    if provider not in OBSERVABILITY_READ_PROVIDERS:
+        raise LookupError(f"ObservabilityReadProvider inconnu : {provider!r} (attendu in {OBSERVABILITY_READ_PROVIDERS})")
+    if capability not in OBSERVABILITY_READ_CAPABILITIES:
+        raise LookupError(f"capacité observability-read inconnue : {capability!r} (attendu in {OBSERVABILITY_READ_CAPABILITIES})")
+    impl = resolve_capability(capability, observability_read_descriptors(provider, capability), observability_read_binders())
+    require_contract(impl)
+    return ObservabilityReadHandle(impl, capability)
+
+
+__all__ = ["OBS_HEALTH", "OBSERVABILITY_READ_CAPABILITIES", "LOCAL_CONTROL_PLANE", "OBSERVABILITY_READ_PROVIDERS", "observability_read_descriptors", "observability_read_binders", "resolve_observability_read", "UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
            "OPENAI", "GEMINI", "COGNITION_PROVIDERS",
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
            "LOCAL_BUILDER", "BUILD_PROVIDERS",
