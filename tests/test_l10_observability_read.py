@@ -224,3 +224,41 @@ def test_produce_rejects_unknown_capability(tmp_path):
                                    adapter=LocalControlPlaneReadAdapter(),
                                    control_plane_src=tmp_path, scc_root=tmp_path,
                                    tool_store=FakeToolStore(), project_id="p", clock=lambda: CLK)
+
+
+# ===================================================================== #
+# ADDITIF (D-2/D-3) — voie RAPPORTEUSE read_reported + contexte de provenance.
+# Les assertions HISTORIQUES ci-dessus (read/produce : dict de succès, raise sur refus) restent INCHANGÉES.
+# ===================================================================== #
+def test_read_reported_returns_structured_report(fake_cp, tmp_path):
+    ts = FakeToolStore()
+    h = resolve_observability_read(OBS_HEALTH)
+    rep = h.read_reported(control_plane_src=tmp_path, scc_root=tmp_path, tool_store=ts,
+                          project_id="proj", clock=lambda: CLK,
+                          pursuit_ref="pursuit_r", decision_source="explicit_request")
+    assert rep["execution"]["ok"] is True and rep["persistence"]["status"] == "recorded"
+    assert rep["persistence"]["tool_ref"] == "tinv_fake" and rep["prerequisite"]["status"] == "ok"
+    assert len(ts.records) == 1                                    # UN SEUL record
+    assert ts.records[0]["pursuit_ref"] == "pursuit_r"            # D-3 contexte persisté
+    assert ts.records[0]["decision_source"] == "explicit_request"
+
+
+def test_read_reported_execution_failure_records_real_ref():
+    # control_plane_src None ⇒ échec d'exécution PRIS EN CHARGE ; fait enregistré avec ref RÉELLE (ne lève pas)
+    ts = FakeToolStore()
+    h = resolve_observability_read(OBS_HEALTH)
+    rep = h.read_reported(control_plane_src=None, scc_root=None, tool_store=ts,
+                          project_id="p", clock=lambda: CLK,
+                          pursuit_ref="pursuit_r", decision_source="explicit_request")
+    assert rep["execution"]["status"] == "failed" and rep["execution"]["kind"] == "unavailable"
+    assert rep["persistence"]["status"] == "recorded" and rep["persistence"]["tool_ref"] == "tinv_fake"
+    assert len(ts.records) == 1
+
+
+def test_read_still_accepts_no_context_kwargs(fake_cp, tmp_path):
+    # rétrocompat : ancien appel read() SANS pursuit_ref/decision_source → dict historique inchangé
+    ts = FakeToolStore()
+    h = resolve_observability_read(OBS_HEALTH)
+    out = h.read(control_plane_src=tmp_path, scc_root=tmp_path, tool_store=ts,
+                 project_id="proj", clock=lambda: CLK)
+    assert out["ok"] is True and out["tool_ref"] == "tinv_fake"

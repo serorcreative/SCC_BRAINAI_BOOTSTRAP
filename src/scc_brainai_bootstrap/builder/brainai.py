@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from scc_brainai_bootstrap.builder.build import BuildCapability, produce_build
 from scc_brainai_bootstrap.builder.confirmations import build_confirmation
@@ -64,6 +64,7 @@ from scc_brainai_bootstrap.builder.cost_estimate import (
 from scc_brainai_bootstrap.builder.solution_architecture import (
     SolutionArchitectureCapability, compare_architectures, produce_solution_architecture)
 from scc_brainai_bootstrap.builder.build_authorization import authorization_status, gate_fingerprint
+from scc_brainai_bootstrap.builder.claude_code_runtime import DIAG_MAX, redact
 from scc_brainai_bootstrap.core.clock import digest, short_id
 
 
@@ -146,9 +147,39 @@ def resume_intent(pursuit_id: str, *, payload: Optional[Dict[str, Any]] = None) 
     return Intent(kind="resume", pursuit_ref=pursuit_id.strip(), payload=payload)
 
 
+def consult_intent(capability: str, *, decision_source: str = "explicit_request") -> Intent:
+    """Intention de **consultation** d'une capacité typée enregistrée (seam D-2). **D-1 : standalone** — aucune
+    ``pursuit_ref`` (le rattachement à une Pursuit existante est différé). ``capability`` = slug exact (premier
+    catalogue : ``observability.health``). ``decision_source`` = **attribution du déclenchement** (jamais une
+    autorisation) : seule valeur admise ``"explicit_request"``. Refus fail-closed **avant toute frontière**."""
+    if not isinstance(capability, str) or not capability.strip():
+        raise IntentError("capability (chaîne non vide) requis pour une intention 'consult'")
+    if decision_source != "explicit_request":
+        raise IntentError("decision_source invalide (explicit_request) pour une intention 'consult'")
+    return Intent(kind="consult", payload={"capability": capability.strip(), "decision_source": decision_source})
+
+
 # --------------------------------------------------------------------- #
 # Capacités injectées — facultés louées interchangeables (R8)
 # --------------------------------------------------------------------- #
+@runtime_checkable
+class ObservabilityInvocationCapability(Protocol):
+    """Capacité typée **invocable par le moteur** (seam ``consult``, D-2/Option B). BrainAI en dépend, jamais d'un
+    store/chemin/fournisseur concret (S9/I9). ``served_capability`` = le slug réellement servi (ex.
+    ``observability.health``) ; ``read`` ne reçoit que des valeurs **côté moteur** et renvoie le **rapport structuré**
+    (schéma §4.1 du contrat : ``execution``/``persistence``/``prerequisite``/``as_of``), jamais un accès arbitraire."""
+
+    served_capability: str
+    name: str
+
+    def contract(self) -> Any:
+        ...
+
+    def read(self, *, project_id: str, clock: Callable[[], str],
+             pursuit_ref: str, decision_source: str) -> Dict[str, Any]:
+        ...
+
+
 @dataclass(frozen=True)
 class Capabilities:
     """Conteneur d'**injection** des capacités louées. Chacune doit satisfaire son **Protocol** (vérifié à la
@@ -171,6 +202,10 @@ class Capabilities:
     # Architecture → CostEstimate → sélection/comparaison BrainAI et attache le Cost Gate (fingerprint matériel) à
     # l'Outcome ``awaiting/governance``. Sélection / coût / GO restent BrainAI-owned.
     architecture: Optional[SolutionArchitectureCapability] = None
+    # Seam consult (D-2/Option B) — capacité observability-read **optionnelle** (additive) invocable par le moteur.
+    # Absente (défaut) ⇒ parcours historiques STRICTEMENT inchangés (need/converse/realize/authorize). Présente ⇒
+    # seule capacité invocable par l'intention ``consult`` (premier catalogue : slug ``observability.health``).
+    observability: Optional[ObservabilityInvocationCapability] = None
 
     def __post_init__(self) -> None:
         for role, value, protocol in (
@@ -199,6 +234,10 @@ class Capabilities:
         if self.architecture is not None and not isinstance(self.architecture, SolutionArchitectureCapability):
             raise CapabilityInjectionError(
                 "capacité 'architecture' injectée non conforme à SolutionArchitectureCapability")
+        # Seam consult — capacité observability optionnelle : validée seulement si injectée (Protocol structurel).
+        if self.observability is not None and not isinstance(self.observability, ObservabilityInvocationCapability):
+            raise CapabilityInjectionError(
+                "capacité 'observability' injectée non conforme à ObservabilityInvocationCapability")
 
     def roles(self) -> Tuple[str, ...]:
         """Rôles (facultés louées) injectés, dans l'ordre du parcours courant."""
@@ -291,6 +330,10 @@ class Outcome:
     refused: Optional[str] = None
     reply: Optional[str] = None
     proposal: Optional[Dict[str, Any]] = None
+    # Seam consult (D-2) — résultat **non autoritatif** d'une invocation de capacité, distinct de ``artefact``/
+    # ``proposal`` : enveloppe typée (capability/provider/ok/status/result/tool_ref/as_of/provenance/error/
+    # decision_source/pursuit_ref). Disponible programmatiquement pour une exploitation cognitive ultérieure.
+    invocation: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.state not in PURSUIT_STATES:
@@ -338,6 +381,23 @@ def validate_intent(intent: Any) -> None:
     elif intent.kind == "resume":
         if not isinstance(intent.pursuit_ref, str) or not intent.pursuit_ref.strip():
             raise IntentError("intention 'resume' : référence de poursuite (pursuit_id) requise")
+    elif intent.kind == "consult":
+        # Seam consult (D-1) : payload{capability, decision_source} ; standalone STRICT (pursuit_ref refusé) ;
+        # decision_source = attribution (explicit_request) ; aucun champ inattendu. Protège l'appel DIRECT au moteur.
+        payload = intent.payload if isinstance(intent.payload, dict) else None
+        if payload is None:
+            raise IntentError("intention 'consult' : payload requis (capability)")
+        cap = payload.get("capability")
+        if not isinstance(cap, str) or not cap.strip():
+            raise IntentError("intention 'consult' : payload['capability'] (chaîne non vide) requis")
+        ds = payload.get("decision_source", "explicit_request")
+        if ds != "explicit_request":
+            raise IntentError("intention 'consult' : decision_source invalide (explicit_request)")
+        extra = set(payload.keys()) - {"capability", "decision_source"}
+        if extra:
+            raise IntentError(f"intention 'consult' : champ(s) de payload inattendu(s) : {sorted(extra)}")
+        if intent.pursuit_ref is not None:                 # D-1 : toute référence fournie est refusée (attach différé)
+            raise IntentError("intention 'consult' : pursuit_ref non supporté (rattachement différé)")
     else:
         raise IntentError(f"intention non supportée : kind={intent.kind!r}")
 
@@ -376,6 +436,190 @@ def new_pursuit_id(intent: Intent, project_id: str, as_of: str) -> str:
 def _system_clock() -> str:
     """Horloge réelle : instant UTC ISO 8601. Injectable (paramètre ``clock`` de :class:`BrainAI`)."""
     return datetime.now(timezone.utc).isoformat()
+
+
+# --------------------------------------------------------------------- #
+# Seam consult — conversion déterministe du rapport de capacité en enveloppe ``Outcome.invocation``
+# (contrat REVIEW-ROSE §4.3 priorité R-A + §4.5/§4.6). Aucun résultat autoritatif ; aucune référence fabriquée.
+# --------------------------------------------------------------------- #
+def _consult_reply(invocation: Dict[str, Any]) -> str:
+    """Réponse **déterministe** d'un tour consult (jamais « Poursuite terminée (état : active) »). R-03 : le slug
+    est **normalisé/borné** (`_bound_diag`) avant interpolation — jamais l'entrée brute réémise dans la reply."""
+    status = invocation.get("status")
+    cap = _bound_diag(str(invocation.get("capability")))
+    if status == "succeeded":
+        return f"Consultation « {cap} » effectuée."
+    if status == "refused_before_call":
+        return f"Consultation refusée : capacité « {cap} » non invocable."
+    return f"Consultation « {cap} » indisponible."
+
+
+def _valid_iso(value: Any) -> bool:
+    """R-02 : horodatage **ISO-8601** valide selon la convention existante (sortie de ``datetime.isoformat``),
+    vérifié via ``datetime.fromisoformat`` — **aucun format maison**. Chaîne vide/non-chaîne/non-ISO ⇒ faux."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        datetime.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _bound_diag(text: Any) -> str:
+    """R-03 : diagnostic **normalisé** — coercition chaîne, redaction RV-1, bornage ``DIAG_MAX`` (borne la SOMME,
+    pas seulement chaque cause). Appliqué à tout champ ``error`` non nul."""
+    return (redact(str(text)) or "")[:DIAG_MAX]
+
+
+def _two_causes(label_a: str, a: Any, label_b: str, b: Any) -> str:
+    """R-03 : compose un diagnostic à **deux causes** dont **chacune** survit au bornage — budget RÉPARTI
+    (chaque cause redactée et bornée à ~moitié de ``DIAG_MAX``), puis jointe. La somme reste ≤ ``DIAG_MAX`` :
+    ``_bound_diag`` appliqué ensuite par ``env`` ne tronque donc pas la seconde cause. Aucun nouveau journal."""
+    half = max(1, (DIAG_MAX - 48) // 2)   # réserve pour libellés + séparateurs, afin de rester ≤ DIAG_MAX
+    ra = (redact(str(a)) or "")[:half]
+    rb = (redact(str(b)) or "")[:half]
+    return f"{label_a}: {ra} | {label_b}: {rb}"
+
+
+_EXEC_STATUS = {"succeeded", "failed"}
+_EXEC_KIND = {"ok", "unavailable", "unexpected_error"}
+_PERSIST_STATUS = {"recorded", "failed_indeterminate", "not_attempted"}
+_PREREQ_STATUS = {"ok", "failed"}
+
+
+def _validate_report_shape(report: Any, *, capability: str, provider: Any, served: Any) -> Optional[str]:
+    """R-01 : valide **forme, types, enums et combinaisons croisées** du rapport **AVANT** l'ordre de priorité R-A.
+    Renvoie ``None`` si conforme, sinon un motif (⇒ ``invalid_envelope`` / ``not_guaranteed``). ``execution.ok`` est
+    STRICT (booléen ≡ ``status=="succeeded"``) et réellement vérifié ; aucun statut/kind inconnu n'est normalisé ;
+    les combinaisons interdites (prérequis failed avec persistance ≠ not_attempted, recorded sans tool_ref réel,
+    tool_ref sans recorded, as_of non-ISO avec prérequis ok, etc.) sont rejetées."""
+    # --- (a) PRÉSENCE : structure + toutes les clés requises (nullables incluses). Distingue absence de None. ---
+    if not isinstance(report, dict):
+        return "rapport non structuré"
+    for sect in ("execution", "persistence", "prerequisite"):
+        if sect not in report or not isinstance(report[sect], dict):
+            return "section " + sect + " manquante ou non-dict"
+    if "as_of" not in report:
+        return "clé as_of absente"
+    if report.get("capability") != capability or capability != served:
+        return "identité de capacité incohérente"
+    if report.get("provider") != provider:
+        return "identité de provider incohérente"
+    execution = report["execution"]; persistence = report["persistence"]; prerequisite = report["prerequisite"]
+    as_of = report["as_of"]
+    for k in ("status", "ok", "kind", "result", "error"):
+        if k not in execution:
+            return "execution." + k + " absent"
+    for k in ("status", "tool_ref", "error"):
+        if k not in persistence:
+            return "persistence." + k + " absent"
+    for k in ("status", "error"):
+        if k not in prerequisite:
+            return "prerequisite." + k + " absent"
+    # --- (b) TYPES + ENUMS : `isinstance(str)` AVANT toute appartenance à un set (une liste/dict n'est pas hachable). ---
+    es = execution["status"]; eok = execution["ok"]; ek = execution["kind"]
+    eresult = execution["result"]; eerr = execution["error"]
+    if not isinstance(es, str) or es not in _EXEC_STATUS:
+        return "execution.status invalide"
+    if not isinstance(eok, bool) or eok != (es == "succeeded"):
+        return "execution.ok absent/non-booléen/incohérent avec status"
+    if not isinstance(ek, str) or ek not in _EXEC_KIND:
+        return "execution.kind invalide"
+    if es == "succeeded" and ek != "ok":
+        return "execution.kind incohérent avec succeeded"
+    if es == "failed" and ek == "ok":
+        return "execution.kind incohérent avec failed"
+    if not (eresult is None or isinstance(eresult, dict)):
+        return "execution.result doit être dict ou None"
+    if not isinstance(eerr, str):
+        return "execution.error doit être une chaîne"
+    ps = persistence["status"]; ptr = persistence["tool_ref"]; perr = persistence["error"]
+    if not isinstance(ps, str) or ps not in _PERSIST_STATUS:
+        return "persistence.status invalide"
+    if not isinstance(perr, str):
+        return "persistence.error doit être une chaîne"
+    if ps == "recorded":
+        if not (isinstance(ptr, str) and ptr):
+            return "persistence.recorded sans tool_ref réel"
+    elif ptr is not None:
+        return "tool_ref non nul sans persistence.recorded"
+    prs = prerequisite["status"]; prerr = prerequisite["error"]
+    if not isinstance(prs, str) or prs not in _PREREQ_STATUS:
+        return "prerequisite.status invalide"
+    if not isinstance(prerr, str):
+        return "prerequisite.error doit être une chaîne"
+    if not (as_of is None or isinstance(as_of, str)):
+        return "as_of doit être une chaîne ou None"
+    # --- (c) COMBINAISONS croisées interdites ---
+    if prs == "failed":
+        if ps != "not_attempted":
+            return "prérequis failed avec persistance ≠ not_attempted (incohérent)"
+        if as_of is not None:
+            return "prérequis failed avec as_of non nul (incohérent)"
+    else:  # prs == "ok"
+        if ps == "not_attempted":
+            return "persistance not_attempted avec prérequis ok (incohérent)"
+        if not _valid_iso(as_of):
+            return "prérequis ok sans as_of ISO valide"
+    return None
+
+
+def _convert_observability_report(report: Any, *, capability: str, provider: Any, served: Any,
+                                  decision_source: Any, pursuit_id: str) -> Dict[str, Any]:
+    """Convertit le **rapport structuré** en enveloppe ``Outcome.invocation``. **R-01** : validation de forme/enums/
+    combinaisons **AVANT** l'ordre de priorité R-A (:func:`_validate_report_shape`). Ensuite priorité R-A (§4.3),
+    les formes étant garanties cohérentes : (2) prérequis ``failed`` → ``prerequisite_failure`` / ``not_attempted`` ;
+    (3) persistance ``failed_indeterminate`` → ``persistence_failure`` / ``write_failed_indeterminate`` ; (4)
+    persistance ``recorded`` → succès, erreur d'exécution enregistrée, ou résultat métier invalide (sous-cas a).
+    ``tool_ref`` **exclusivement** de ``persistence.tool_ref`` (jamais fabriqué) ; ``error`` normalisé/borné (R-03)."""
+    def env(status: str, *, ok: bool = False, result: Any = None, tool_ref: Any = None,
+            as_of: Any = None, provenance: str, error: Any) -> Dict[str, Any]:
+        return {"capability": capability, "provider": provider, "ok": ok, "status": status,
+                "result": result, "tool_ref": tool_ref, "as_of": as_of, "provenance": provenance,
+                "error": (None if error is None else _bound_diag(error)),   # R-03 : borne la SOMME, coercition de type
+                "decision_source": decision_source, "pursuit_ref": pursuit_id}
+    # (1) R-01 — forme/types/enums/combinaisons AVANT toute interprétation
+    reason = _validate_report_shape(report, capability=capability, provider=provider, served=served)
+    if reason is not None:
+        return env("invalid_envelope", provenance="not_guaranteed", error="enveloppe de capacité invalide : " + reason)
+    execution = report["execution"]; persistence = report["persistence"]; prerequisite = report["prerequisite"]
+    as_of = report["as_of"]
+    exec_status = execution["status"]; exec_kind = execution["kind"]; exec_result = execution["result"]
+    exec_error = execution["error"]
+    persist_status = persistence["status"]; tool_ref = persistence["tool_ref"]; persist_error = persistence["error"]
+    prereq_error = prerequisite["error"]
+    # (2) prérequis échoué — as_of null, persistance non tentée. R-03 : si l'exécution a AUSSI échoué, CONSERVER
+    # les deux causes (budget réparti, chacune identifiée) ; sinon la seule cause prérequis.
+    if prerequisite["status"] == "failed":
+        if exec_status == "failed" and exec_error:
+            err = _two_causes("prérequis horodatage", prereq_error or "?", "exécution", exec_error)
+        else:
+            err = ("prérequis horodatage : " + prereq_error) if prereq_error else "prérequis horodatage échoué"
+        return env("prerequisite_failure", as_of=None, provenance="not_attempted", error=err)
+    # (3) persistance indéterminée — R-03 : DEUX causes conservées (budget réparti) ; aucune référence, aucun retry
+    if persist_status == "failed_indeterminate":
+        if exec_status == "failed" and exec_error:
+            err = _two_causes("persistance", persist_error or "?", "exécution", exec_error)
+        else:
+            err = persist_error or "échec de persistance indéterminé"
+        return env("persistence_failure", as_of=as_of, tool_ref=None,
+                   provenance="write_failed_indeterminate", error=err)
+    # (4) persistance recorded (garantie : recorded + tool_ref réel par la validation de forme)
+    if exec_status == "succeeded":
+        valid = (isinstance(exec_result, dict)
+                 and isinstance(exec_result.get("global_state"), dict)
+                 and isinstance(exec_result.get("component_health"), dict))
+        if valid:
+            return env("succeeded", ok=True, result=exec_result, tool_ref=tool_ref, as_of=as_of,
+                       provenance="recorded_and_referenced", error=None)
+        # (a) résultat métier invalide DÉJÀ enregistré — provenance réelle
+        return env("invalid_envelope", tool_ref=tool_ref, as_of=as_of, provenance="recorded_and_referenced",
+                   error="résultat d'observabilité invalide (global_state/component_health)")
+    # erreur d'exécution enregistrée (unavailable / unexpected_error)
+    status = "unavailable" if exec_kind == "unavailable" else "unexpected_error"
+    return env(status, tool_ref=tool_ref, as_of=as_of, provenance="recorded_and_referenced",
+               error=exec_error or "erreur d'exécution")
 
 
 # --------------------------------------------------------------------- #
@@ -431,6 +675,8 @@ class BrainAI:
             return self._converse(intent, context)
         if intent.kind == "realize":
             return self._realize(intent, context)
+        if intent.kind == "consult":
+            return self._consult(intent, context)
         raise NotImplementedError(
             "intention 'resume' (reprise d'une Pursuit suspendue) pas encore orchestrée")
 
@@ -828,6 +1074,53 @@ class BrainAI:
         return Outcome(state="terminal", project_id=project_id, pursuit_id=pursuit_id, as_of=clock(),
                        refused=refused, cost_total={"value": 0.0, "kind": "real"})
 
+    # ----------------------------------------------------------------- #
+    # Seam consult — invocation gouvernée d'UNE capacité typée injectée (D-1 standalone ; premier cas
+    # observability.health). Écrit UNIQUEMENT le fait ToolInvocation (via la capacité liée) ; n'écrit aucun
+    # turn/confirmation/authorization ; ne renvoie JAMAIS ``terminal`` (une lecture ne clôt pas une Pursuit).
+    # ----------------------------------------------------------------- #
+    def _consult(self, intent: Intent, context: RunContext) -> Outcome:
+        """Invocation gouvernée d'une capacité typée injectée. Mint l'identité **avant** la lecture ; refuse
+        fail-closed (avant appel) un slug non câblé ; appelle ``cap.read`` (valeurs côté moteur uniquement) ;
+        convertit le rapport en ``Outcome.invocation`` (non autoritatif) ; ``state='active'`` (jamais terminal) ;
+        ``reply`` déterministe ; coût ``unavailable``. Capacité absente ⇒ ``CapabilityInjectionError`` (panne de
+        câblage, jamais un refus de requête)."""
+        project_id = context.project_id
+        clock = self._clock
+        capability = intent.payload["capability"]
+        decision_source = intent.payload.get("decision_source", "explicit_request")
+        # R-02 : UN SEUL instant de tour, validé ISO (convention existante `datetime.isoformat`). Panne/format
+        # invalide ⇒ défaillance TECHNIQUE (aucun Outcome daté fictivement, → 500) ; aucun appel de secours à
+        # l'horloge ensuite. Cet instant de tour est DISTINCT de l'instant d'invocation (as_of du rapport, S4).
+        turn_as_of = clock()
+        if not _valid_iso(turn_as_of):
+            raise RuntimeError("horloge de tour indisponible/invalide (Outcome non datable)")
+        pursuit_id = new_pursuit_id(intent, project_id, turn_as_of)     # identité stable, AVANT la lecture
+        cap = self._capabilities.observability
+        if cap is None:
+            raise CapabilityInjectionError("capacité 'observability' requise pour l'intention 'consult'")
+        served = getattr(cap, "served_capability", None)
+        provider = getattr(cap, "name", None)
+        # Slug non câblé ⇒ refus gouverné AVANT tout appel (aucune lecture, aucun fait). R-A : ``as_of=None`` (aucun
+        # rapport produit) ; R-03 : message normalisé/borné (jamais l'entrée brute interpolée telle quelle).
+        if capability != served:
+            invocation = {"capability": capability, "provider": provider, "ok": False,
+                          "status": "refused_before_call", "result": None, "tool_ref": None,
+                          "as_of": None, "provenance": "not_called",
+                          "error": _bound_diag("capacité non invocable dans ce catalogue : " + str(capability)),
+                          "decision_source": decision_source, "pursuit_ref": pursuit_id}
+            return Outcome(state="active", project_id=project_id, pursuit_id=pursuit_id, as_of=turn_as_of,
+                           invocation=invocation, reply=_consult_reply(invocation),
+                           cost_total={"value": None, "kind": "unavailable"})
+        report = cap.read(project_id=project_id, clock=clock,
+                          pursuit_ref=pursuit_id, decision_source=decision_source)
+        invocation = _convert_observability_report(
+            report, capability=capability, provider=provider, served=served,
+            decision_source=decision_source, pursuit_id=pursuit_id)
+        return Outcome(state="active", project_id=project_id, pursuit_id=pursuit_id, as_of=turn_as_of,
+                       invocation=invocation, reply=_consult_reply(invocation),
+                       cost_total={"value": None, "kind": "unavailable"})
+
     # ----- Relecture d'historique côté moteur (jamais reconstruit par l'UI) ----- #
     @staticmethod
     def _require_turns(stores: Any) -> Any:
@@ -874,5 +1167,6 @@ class BrainAI:
 
 __all__ = ["BrainAI", "Capabilities", "RunContext", "Stores", "Outcome", "Intent", "PURSUIT_STATES",
            "BrainAIError", "CapabilityInjectionError", "IntentError", "NeedError", "GovernanceError",
-           "need_intent", "converse_intent", "realize_intent", "resume_intent", "validate_need",
+           "need_intent", "converse_intent", "realize_intent", "resume_intent", "consult_intent",
+           "ObservabilityInvocationCapability", "validate_need",
            "validate_intent", "validate_run_context", "new_pursuit_id"]

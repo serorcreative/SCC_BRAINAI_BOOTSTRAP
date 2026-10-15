@@ -508,7 +508,44 @@ def resolve_observability_read(capability: str, provider: str = LOCAL_CONTROL_PL
     return ObservabilityReadHandle(impl, capability)
 
 
-__all__ = ["OBS_HEALTH", "OBSERVABILITY_READ_CAPABILITIES", "LOCAL_CONTROL_PLANE", "OBSERVABILITY_READ_PROVIDERS", "observability_read_descriptors", "observability_read_binders", "resolve_observability_read", "UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
+class _BoundObservabilityCapability:
+    """Capacité observability-read **liée** (Option B) — satisfait le Protocol ``ObservabilityInvocationCapability``
+    (structurel : ``served_capability``/``name``/``contract()``/``read``). Le composition root pré-lie ici les
+    dépendances d'INFRASTRUCTURE (``control_plane_src``/``scc_root`` résolus par ``BrainAIConfig``, ``tool_store`` de
+    session) ; ``read`` n'accepte ensuite que des valeurs **côté moteur** (``project_id``/``clock``/``pursuit_ref``/
+    ``decision_source``). BrainAI ne connaît donc ni chemin SCC, ni store concret, ni fournisseur (I9/S9). Toute
+    exécution passe par la voie publique unique ``ObservabilityReadHandle.read_reported`` (D-2)."""
+
+    def __init__(self, handle: ObservabilityReadHandle, *, control_plane_src: Any, scc_root: Any, tool_store: Any) -> None:
+        self._handle = handle
+        self._control_plane_src = control_plane_src
+        self._scc_root = scc_root
+        self._tool_store = tool_store
+        self.served_capability = handle.capability
+        self.name = handle.name
+
+    def contract(self) -> Any:
+        return self._handle.contract()
+
+    def read(self, *, project_id: str, clock: Any, pursuit_ref: Any, decision_source: Any) -> Dict[str, Any]:
+        return self._handle.read_reported(
+            control_plane_src=self._control_plane_src, scc_root=self._scc_root, tool_store=self._tool_store,
+            project_id=project_id, clock=clock, pursuit_ref=pursuit_ref, decision_source=decision_source)
+
+
+def resolve_observability_capability(*, tool_store: Any) -> _BoundObservabilityCapability:
+    """Assemble la capacité observability-read **injectable** (Option B) pour le seam ``consult`` : résout la voie
+    publique via :func:`resolve_observability_read` (``OBS_HEALTH``), applique ``require_contract``, puis **lie**
+    ``control_plane_src``/``scc_root`` (résolus **ici seulement** via ``BrainAIConfig``, I9) + le ``tool_store`` de
+    session. N'exécute aucune lecture ; retourne l'objet lié invocable par le moteur."""
+    cfg = BrainAIConfig()
+    handle = resolve_observability_read(OBS_HEALTH)          # voie publique unique + require_contract interne
+    require_contract(handle)                                 # contrat complet exigé (T2) sur la voie publique
+    return _BoundObservabilityCapability(
+        handle, control_plane_src=cfg.control_plane_src, scc_root=cfg.scc_root, tool_store=tool_store)
+
+
+__all__ = ["OBS_HEALTH", "OBSERVABILITY_READ_CAPABILITIES", "LOCAL_CONTROL_PLANE", "OBSERVABILITY_READ_PROVIDERS", "observability_read_descriptors", "observability_read_binders", "resolve_observability_read", "resolve_observability_capability", "UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
            "OPENAI", "GEMINI", "COGNITION_PROVIDERS",
            "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
            "LOCAL_BUILDER", "BUILD_PROVIDERS",

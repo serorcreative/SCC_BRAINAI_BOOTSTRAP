@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -137,12 +138,20 @@ def _read_health(module: Any) -> Dict[str, Any]:
 
 def produce_observability_read(*, capability: str, adapter: LocalControlPlaneReadAdapter,
                                control_plane_src: Any, scc_root: Any, tool_store: Any,
-                               project_id: str, clock: Any) -> Dict[str, Any]:
-    """**Chemin normal unique** d'une lecture d'observabilité typée (Variante MIN). Étapes : (1) import canonique de
-    09 ; (2) appel **exclusif** de ``global_state()``+``component_health()`` (allow-list, aucune autre méthode, aucun
-    effet de bord) ; (3) horodatage + **fait ToolInvocation** append-only (provenance N4, résultat redacté/borné,
-    même sur refus) ; (4) résultat **typé** redacté (SEC-3) OU refus fail-closed. Réutilise ``ToolInvocationStore`` ;
-    aucun nouveau journal, aucune seconde source de vérité."""
+                               project_id: str, clock: Any,
+                               pursuit_ref: Any = None, decision_source: Any = None) -> Dict[str, Any]:
+    """**Chemin normal unique HISTORIQUE** d'une lecture d'observabilité typée (Variante MIN). Étapes : (1) import
+    canonique de 09 ; (2) appel **exclusif** de ``global_state()``+``component_health()`` (allow-list, aucune autre
+    méthode, aucun effet de bord) ; (3) horodatage + **fait ToolInvocation** append-only (provenance N4, résultat
+    redacté/borné, même sur refus) ; (4) résultat **typé** redacté (SEC-3) OU refus fail-closed. Réutilise
+    ``ToolInvocationStore`` ; aucun nouveau journal, aucune seconde source de vérité.
+
+    **D-2 (évolution ADDITIVE — comportement historique PRÉSERVÉ)** : succès → **dict historique**
+    (``ok``/``status``/``result``/``tool_ref``/``as_of``) ; refus prévu → ``ObservabilityReadError`` (après
+    enregistrement du fait ``failed``, comme aujourd'hui) ; exception **inattendue** → **échappe avant** ``record``
+    (comme aujourd'hui). Seule évolution : ``pursuit_ref``/``decision_source`` **optionnels**, transmis à ``record``
+    **s'ils sont fournis** (sinon absents du fait). La voie enrichie non-levante vit dans
+    :func:`produce_observability_report` (jamais ici)."""
     if capability not in OBSERVABILITY_READ_CAPABILITIES:
         raise ObservabilityReadError(
             f"capacité observability inconnue : {capability!r} (admis ∈ {OBSERVABILITY_READ_CAPABILITIES})")
@@ -159,16 +168,92 @@ def produce_observability_read(*, capability: str, adapter: LocalControlPlaneRea
         result = None
         err_text = str(exc)
     as_of = clock()
+    # R-04 : voie HISTORIQUE — ne transmettre les nouveaux mots-clés de contexte que **s'ils sont fournis**, afin de
+    # rester compatible avec un store injecté à signature strictement historique (sans ``**kwargs``). Aucun essai/retry
+    # après ``TypeError`` : l'appel est correct dès la première tentative.
+    _ctx_kw: Dict[str, Any] = {}
+    if pursuit_ref is not None:
+        _ctx_kw["pursuit_ref"] = pursuit_ref
+    if decision_source is not None:
+        _ctx_kw["decision_source"] = decision_source
     tool_fact = tool_store.record(
         project_id=project_id, tool=f"{adapter.name}:{capability}", argv=argv, cwd=cwd,
         status=status, exit_code=(0 if status == "succeeded" else 1),
         stdout=("" if status != "succeeded" else (redact(str(result)) or "")[:DIAG_MAX]),
         stderr=(redact(err_text) or "")[:DIAG_MAX],
-        timed_out=False, as_of=as_of)
+        timed_out=False, as_of=as_of, **_ctx_kw)
     if status != "succeeded":                                  # provenance enregistrée PUIS refus (aucun fallback silencieux)
         raise ObservabilityReadError(err_text or "lecture observabilité échouée")
     return {"capability": capability, "provider": adapter.name, "ok": True, "status": status,
             "result": result, "tool_ref": tool_fact["invocation_id"], "as_of": as_of}
+
+
+def produce_observability_report(*, capability: str, adapter: LocalControlPlaneReadAdapter,
+                                 control_plane_src: Any, scc_root: Any, tool_store: Any,
+                                 project_id: str, clock: Any,
+                                 pursuit_ref: Any, decision_source: Any) -> Dict[str, Any]:
+    """**Voie RAPPORTEUSE (D-2)** — même jeu de primitives partagées que :func:`produce_observability_read`
+    (``_import_control_plane`` + ``_read_health`` = **une** lecture ; ``tool_store.record`` = **un** écrit), mais
+    enveloppe d'erreur et sortie **distinctes** : **phases séparées** (exécution / prérequis horodatage /
+    persistance), **stade connu par STRUCTURE** (jamais déduit du seul type), **ne lève pas** hors garde d'argument,
+    et **transporte la référence RÉELLE** du fait quand il a été enregistré (y compris sur erreur d'exécution).
+    Aucune seconde lecture de 09 ni second écrit pour « convertir » une erreur ou bâtir le rapport."""
+    if capability not in OBSERVABILITY_READ_CAPABILITIES:                # S0 : garde d'argument (lève, avant tout effet)
+        raise ObservabilityReadError(
+            f"capacité observability inconnue : {capability!r} (admis ∈ {OBSERVABILITY_READ_CAPABILITIES})")
+    argv: List[str] = [f"{adapter.name}:{capability}", "global_state", "component_health"]
+    cwd = str(scc_root) if scc_root is not None else ""
+    # --- Phase EXÉCUTION (bloc isolé) : capture TOUTE exception ; kind classé AU POINT DE CAPTURE.
+    try:
+        module = _import_control_plane(control_plane_src)                # S1
+        raw = _read_health(module)                                       # S2 : global_state() + component_health()
+        exec_status = "succeeded"; exec_kind = "ok"
+        exec_result: Any = _redact_tree(raw)                            # S3
+        exec_error = ""
+    except ObservabilityReadError as exc:
+        exec_status = "failed"; exec_kind = "unavailable"; exec_result = None
+        exec_error = (redact(str(exc)) or "")[:DIAG_MAX]
+    except Exception as exc:                                             # inattendu PRIS EN CHARGE (voie rapporteuse)
+        exec_status = "failed"; exec_kind = "unexpected_error"; exec_result = None
+        exec_error = (redact(str(exc)) or "")[:DIAG_MAX]
+    # --- Prérequis : horodatage (S4). Échec => stade prérequis distinct, as_of=None, S5 NON atteint (pas de secours).
+    prereq_status = "ok"; prereq_error = ""; as_of: Any = None
+    try:
+        as_of_candidate = clock()
+        # R-02 : validation ISO-8601 (convention existante `datetime.isoformat`, via `fromisoformat`) — pas
+        # seulement une chaîne non vide. Un horodatage non ISO fait échouer le prérequis et EMPÊCHE `record`.
+        if not isinstance(as_of_candidate, str) or not as_of_candidate.strip():
+            raise ObservabilityReadError("horodatage absent/non-chaîne (clock)")
+        try:
+            datetime.fromisoformat(as_of_candidate)
+        except ValueError:
+            raise ObservabilityReadError("horodatage non ISO-8601 (clock)")
+        as_of = as_of_candidate
+    except Exception as exc:
+        prereq_status = "failed"; prereq_error = (redact(str(exc)) or "")[:DIAG_MAX]
+    # --- Phase PERSISTANCE (bloc isolé, distinct) : UN SEUL record ; seulement si prérequis ok ; aucun retry.
+    if prereq_status != "ok":
+        persistence = {"status": "not_attempted", "tool_ref": None, "error": ""}
+    else:
+        try:
+            tool_fact = tool_store.record(                              # S5 (unique)
+                project_id=project_id, tool=f"{adapter.name}:{capability}", argv=argv, cwd=cwd,
+                status=exec_status, exit_code=(0 if exec_status == "succeeded" else 1),
+                stdout=("" if exec_status != "succeeded" else (redact(str(exec_result)) or "")[:DIAG_MAX]),
+                stderr=(exec_error or ""),
+                timed_out=False, as_of=as_of, pursuit_ref=pursuit_ref, decision_source=decision_source)
+            persistence = {"status": "recorded", "tool_ref": tool_fact.get("invocation_id"), "error": ""}
+        except Exception as exc:                                        # défaillance persistance : indéterminée
+            persistence = {"status": "failed_indeterminate", "tool_ref": None,
+                           "error": (redact(str(exc)) or "")[:DIAG_MAX]}
+    return {
+        "capability": capability, "provider": adapter.name,
+        "execution": {"status": exec_status, "ok": exec_status == "succeeded", "kind": exec_kind,
+                      "result": exec_result, "error": exec_error},
+        "persistence": persistence,
+        "prerequisite": {"status": prereq_status, "error": prereq_error},
+        "as_of": as_of,
+    }
 
 
 class ObservabilityReadHandle:
@@ -187,13 +272,27 @@ class ObservabilityReadHandle:
         return self._adapter.contract()
 
     def read(self, *, control_plane_src: Any, scc_root: Any, tool_store: Any,
-             project_id: str, clock: Any) -> Dict[str, Any]:
-        """Unique exécution publique. Délègue à :func:`produce_observability_read` — import canonique + allow-list +
-        provenance **toujours** appliqués."""
+             project_id: str, clock: Any,
+             pursuit_ref: Any = None, decision_source: Any = None) -> Dict[str, Any]:
+        """Voie HISTORIQUE (comportement PRÉSERVÉ). Délègue à :func:`produce_observability_read` — import canonique +
+        allow-list + provenance **toujours** appliqués ; succès → dict historique ; refus → ``ObservabilityReadError``.
+        ``pursuit_ref``/``decision_source`` **optionnels** (défaut None) — anciens appels inchangés."""
         return produce_observability_read(
             capability=self.capability, adapter=self._adapter, control_plane_src=control_plane_src,
-            scc_root=scc_root, tool_store=tool_store, project_id=project_id, clock=clock)
+            scc_root=scc_root, tool_store=tool_store, project_id=project_id, clock=clock,
+            pursuit_ref=pursuit_ref, decision_source=decision_source)
+
+    def read_reported(self, *, control_plane_src: Any, scc_root: Any, tool_store: Any,
+                      project_id: str, clock: Any, pursuit_ref: Any, decision_source: Any) -> Dict[str, Any]:
+        """Voie RAPPORTEUSE (D-2), pour le seam ``consult``. Délègue à :func:`produce_observability_report`
+        (phases séparées, ne lève pas hors garde d'argument, référence réelle transmise). Même jeu de primitives
+        partagées que :meth:`read` — aucune seconde lecture/écriture."""
+        return produce_observability_report(
+            capability=self.capability, adapter=self._adapter, control_plane_src=control_plane_src,
+            scc_root=scc_root, tool_store=tool_store, project_id=project_id, clock=clock,
+            pursuit_ref=pursuit_ref, decision_source=decision_source)
 
 
 __all__ = ["PROVIDER_NAME", "OBS_HEALTH", "OBSERVABILITY_READ_CAPABILITIES", "ObservabilityReadError",
-           "LocalControlPlaneReadAdapter", "ObservabilityReadHandle", "produce_observability_read"]
+           "LocalControlPlaneReadAdapter", "ObservabilityReadHandle", "produce_observability_read",
+           "produce_observability_report"]
