@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 158
+- **Entrées totales** : 159
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -20,24 +20,24 @@
 | doctrine | 30 |
 | evolution_record | 62 |
 | invariant | 5 |
-| milestone | 14 |
+| milestone | 15 |
 | ratification | 1 |
 
 ## Catégories de preuve utilisées (calculé)
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 142 |
+| source_evidence | 143 |
 | artifact_evidence | 5 |
-| test_evidence | 13 |
-| runtime_evidence | 13 |
+| test_evidence | 14 |
+| runtime_evidence | 14 |
 
 | Par migration_state | n |
 |---|---|
 | adapter | 2 |
 | archiver | 1 |
 | banc_patrimoine | 2 |
-| connecter | 9 |
+| connecter | 10 |
 | conserver | 3 |
 | doctrine | 1 |
 | ne_jamais_rebrancher | 2 |
@@ -47,7 +47,7 @@
 |---|---|
 | code | 3 |
 | dormant | 2 |
-| exerce_reellement | 1 |
+| exerce_reellement | 2 |
 | prototype | 3 |
 | raccorde | 4 |
 | teste | 8 |
@@ -112,6 +112,7 @@
 | `MILESTONE-L10-OBSERVABILITY-READ-ONLY-MIN-2026-09-17` | milestone | L10 — Software Control Plane : connexion READ-ONLY MINIMALE de 09_CONTROL_PLANE — capac… | merged | — | — | runtime |
 | `MILESTONE-L10.1-TYPED-GIT-READ-CONTROL-2026-09-10` | milestone | L10.1 — Software Control Plane : capacités Git en LECTURE SEULE typées (classe R) — git… | merged | — | — | runtime |
 | `MILESTONE-L10.2-TYPED-GIT-WRITE-CONTROL-2026-09-14` | milestone | L10.2 — Software Control Plane : capacités Git en ÉCRITURE LOCALE gouvernée typées (cla… | merged | — | — | runtime |
+| `MILESTONE-L11-CONSULT-RUNTIME-E2E-MIN-2026-10-15` | milestone | L11 — Consult Runtime E2E (MIN) : consultation BrainAI operationnelle de bout en bout. … | present | — | — | runtime |
 | `MILESTONE-L2-CLOSURE-2026-08-27` | milestone | L2 — clôture : store-safety / concurrence / vocabulaire (Memory-11 + Core 17 mergés, CI… | closed | — | — | runtime |
 | `MILESTONE-L3-PURSUIT-MEMORY11-CONTINUITY-2026-08-27` | milestone | L3 — continuité durable Pursuit → Memory-11 à la livraison (enrichissement additif, mer… | merged | — | — | runtime |
 | `MILESTONE-L4-PURSUIT-RETRIEVAL-2026-08-27` | milestone | L4 — rappel en lecture d'une Pursuit depuis Memory-11 (retrieve_pursuit ; premier chemi… | merged | — | — | runtime |
