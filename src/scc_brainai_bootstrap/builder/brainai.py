@@ -64,7 +64,7 @@ from scc_brainai_bootstrap.builder.cost_estimate import (
 from scc_brainai_bootstrap.builder.solution_architecture import (
     SolutionArchitectureCapability, compare_architectures, produce_solution_architecture)
 from scc_brainai_bootstrap.builder.build_authorization import authorization_status, gate_fingerprint
-from scc_brainai_bootstrap.builder.claude_code_runtime import DIAG_MAX, redact
+from scc_brainai_bootstrap.builder.diagnostics import DIAG_MAX, redact
 from scc_brainai_bootstrap.core.clock import digest, short_id
 
 

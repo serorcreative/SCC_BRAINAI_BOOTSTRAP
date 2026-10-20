@@ -16,9 +16,10 @@ ferait courir un risque de divergence → fuite. Dépend **uniquement de la bibl
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any, Dict, List, Optional
+
+from scc_brainai_bootstrap.builder.diagnostics import DIAG_MAX, redact  # réexport (RV-1) ; foyer neutre : builder/diagnostics
 
 
 def parse_envelope(stdout: str) -> Optional[Dict[str, Any]]:
@@ -40,42 +41,14 @@ def extract_cost(envelope: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 # --------------------------------------------------------------------- #
 # Diagnostic brut BORNÉ + ASSAINI d'un échec (RV-1). Un fait ``failed`` doit rester gouvernable sans
 # rejouer l'appel, SANS jamais fuiter de secret. L'environnement n'est JAMAIS inclus.
+# ``DIAG_MAX`` et ``redact`` vivent désormais dans ``builder/diagnostics`` (module NEUTRE, I9) et sont
+# réexportés ci-dessus (import en tête) pour les adaptateurs ; **source unique** de la redaction conservée.
 # --------------------------------------------------------------------- #
-DIAG_MAX = 1200          # bornage d'un flux (stdout/stderr/result)
-
-# Redaction best-effort **documentée** — noms sensibles identifiables avec frontières de mots :
-# ``monkey=value`` reste visible ; ``api_key/token/secret/password/credential`` (+ variantes) masqués.
-_SK_RE = re.compile(r"sk-[A-Za-z0-9._\-]{8,}")                       # clés type sk-…
-_BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]+")          # en-têtes Bearer
-_SENSITIVE_NAME = re.compile(                                        # <nom sensible> = <valeur>
-    r"(?i)(?<![\w-])"
-    r"([\"']?[A-Za-z0-9_-]*?"
-    r"(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|token|secret|password|passwd|credentials?)"
-    r"[A-Za-z0-9_-]*[\"']?\s*[:=]\s*[\"']?)"
-    r"([^\s\"',}]+)")
-_HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")                        # longues chaînes hex
-_B64_RE = re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b")               # longues chaînes base64
 _ABS_PATH_RE = re.compile(r"^/[^\s]*$")                              # token = chemin absolu
 
 _PROMPT_FLAGS = {"-p", "--print"}
 _SCHEMA_FLAGS = {"--json-schema"}
 _AUTH_FLAG_RE = re.compile(r"(?i)(auth|token|secret|password|passwd|credential|api[_-]?key|apikey|bearer)")
-
-
-def redact(s: str) -> str:
-    """Redaction best-effort : ``sk-…``, ``Bearer``, affectations à **nom sensible identifiable**
-    (api_key/token/secret/password/credential + variantes, avec frontières — ``monkey`` reste
-    visible), longues chaînes hex/base64 ; le chemin ``HOME`` → ``~``. Ne masque **que** ces motifs.
-    L'environnement n'est jamais inclus."""
-    home = os.environ.get("HOME")
-    if home:
-        s = s.replace(home, "~")
-    s = _SK_RE.sub("[REDACTED-KEY]", s)
-    s = _BEARER_RE.sub("Bearer [REDACTED]", s)
-    s = _SENSITIVE_NAME.sub(lambda m: m.group(1) + "[REDACTED]", s)
-    s = _HEX_RE.sub("[REDACTED-HEX]", s)
-    s = _B64_RE.sub("[REDACTED-B64]", s)
-    return s
 
 
 def _clean(text: Any, limit: int = DIAG_MAX) -> Optional[str]:
