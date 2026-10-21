@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from brainai_app import contract
-from brainai_app.composition import authorize, converse, realize, run_pursuit
+from brainai_app.composition import authorize, consult, converse, realize, run_pursuit
+from scc_brainai_bootstrap.builder.brainai import CapabilityInjectionError, IntentError
 
 _STATIC = Path(__file__).resolve().parent / "static"
 SESSION_TOKEN = secrets.token_urlsafe(24)          # jeton de session (ADR-UI-001), régénéré à chaque import
@@ -157,8 +158,36 @@ class _Handler(BaseHTTPRequestHandler):
                 data = authorize(pursuit_ref.strip(), presented_spec_ref=presented_spec_ref.strip(),
                                  presented_gate_fingerprint=presented_gate_fingerprint.strip(),
                                  decision=decision, actor=payload.get("actor"))
+            elif kind == "consult":
+                # Seam consult — MÊME endpoint/pipeline. Validation de **forme** (fail-closed) ; le serveur ne
+                # résout AUCUN nom (I9). D-1 : `pursuit_ref` absent/null ⇒ standalone ; toute autre valeur ⇒ 400
+                # AVANT tout effet. C-C : `decision_source` absent ⇒ défaut ; présent ≠ explicit_request ⇒ 400.
+                capability = payload.get("capability")
+                if not isinstance(capability, str) or not capability.strip():
+                    self._send_json(400, {"error": "champ 'capability' requis (chaîne non vide)"}); return
+                if "pursuit_ref" in payload and payload.get("pursuit_ref") is not None:
+                    self._send_json(400, {"error": "champ 'pursuit_ref' non supporté (rattachement différé)"}); return
+                decision_source = payload.get("decision_source", "explicit_request")
+                if decision_source != "explicit_request":
+                    self._send_json(400, {"error": "champ 'decision_source' invalide (explicit_request)"}); return
+                extra = set(payload.keys()) - {"kind", "mode", "capability", "decision_source", "pursuit_ref"}
+                if extra:
+                    # R-03 : message CONSTANT — ne pas réémettre les noms de clés reçus (aucun écho brut).
+                    self._send_json(400, {"error": "champ(s) inattendu(s) dans la requête 'consult'"}); return
+                # R-03 : mapping explicite (nouveau parcours seulement). Erreurs techniques → 500 avec message
+                # normalisé SÛR (jamais le contenu brut d'une exception) ; jamais reclassées en erreur utilisateur.
+                try:
+                    data = consult(capability.strip(), decision_source=decision_source, mode=mode)
+                except IntentError:                          # refus de forme (défensif) — erreur de requête
+                    self._send_json(400, {"error": "requête 'consult' invalide"}); return
+                except CapabilityInjectionError:             # câblage serveur — panne technique
+                    self._send_json(500, {"error": "erreur interne (capacité non injectée)"}); return
+                except LookupError:                          # résolution interne impossible — panne technique
+                    self._send_json(500, {"error": "erreur interne (résolution de capacité)"}); return
+                except Exception:                            # toute autre panne technique — jamais un 4xx, jamais brute
+                    self._send_json(500, {"error": "erreur interne"}); return
             else:
-                self._send_json(400, {"error": "kind invalide (need|converse|realize|authorize)"}); return
+                self._send_json(400, {"error": "kind invalide (need|converse|realize|authorize|consult)"}); return
             self._send_json(200, contract.envelope("pursue", data, _now())); return
         self._send_json(404, {"error": "opération non servie"})
 

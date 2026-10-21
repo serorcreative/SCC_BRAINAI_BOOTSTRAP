@@ -13,7 +13,9 @@ defaults:
 
 jobs:
   core-non-regression:
-    runs-on: ubuntu-latest
+    # Épinglé à 22.04 : ubuntu-latest (26.04) ne fournit plus Python 3.9 dans le toolcache
+    # (setup-python échoue). 22.04 conserve la baseline runtime L0-E = Python 3.9.
+    runs-on: ubuntu-22.04
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       # Gate du seul test facturable maintenu FAUX de façon explicite (fail-closed) :

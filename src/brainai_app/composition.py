@@ -11,15 +11,18 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import tempfile
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from scc_brainai_bootstrap.builder.brainai import (
-    BrainAI, Capabilities, RunContext, Stores, converse_intent, need_intent, realize_intent)
+    BrainAI, Capabilities, RunContext, Stores, _bound_diag, consult_intent, converse_intent, need_intent,
+    realize_intent)
 from scc_brainai_bootstrap.builder.arbitrations import ArbitrationStore
 from scc_brainai_bootstrap.builder.build_authorization import (
     BuildAuthorizationStore, authorization_status, build_authorization_fact, resolve_cost_gate)
@@ -198,6 +201,8 @@ def to_viewmodel(outcome: Any, *, need: Optional[str], mode: str, budget_usd: fl
         },
         "steps": steps,
         "deliverables": deliverables,
+        # Seam consult — enveloppe d'invocation reflétée telle quelle (None pour les parcours historiques).
+        "invocation": getattr(outcome, "invocation", None),
     }
 
 
@@ -340,6 +345,171 @@ def _settle_dir(root: Path, pursuit_id: str) -> Path:
 def _remember(pursuit_id: str, root: Path) -> None:
     with _SESSIONS_LOCK:
         _SESSIONS[pursuit_id] = root
+
+
+# --------------------------------------------------------------------- #
+# R-07 (rev5) — Publication SANS remplacement du transit `consult` vers son chemin déterministe.
+# Primitives EXCLUSIVES relatives aux descripteurs de répertoire (linkat/mkdirat) : non-remplacement AU MOMENT
+# de l'opération (FileExistsError si la cible existe déjà), sans redirection possible d'un parent. Types RÉELLEMENT
+# admis par le parcours consult : fichiers réguliers (*.jsonl) et répertoires (workspace `exec` éventuel). Aucun
+# lien symbolique ni type spécial n'est produit par consult ; en rencontrer un ⇒ refus explicite (jamais suivi/
+# recopié). Ce n'est PAS un copieur universel : uniquement la finalisation de consult.
+# --------------------------------------------------------------------- #
+class _UnexpectedTransitEntry(Exception):
+    """Entrée de transit d'un type NON admis par consult (lien symbolique ou type spécial) — refus explicite."""
+
+
+# Opérations requises en mode "relatif à un descripteur" (évite la redirection d'un parent au moment de l'op).
+# ``os.stat(..., follow_symlinks=False)`` (fstatat) est utilisé au lieu de ``os.lstat`` : sur macOS 3.9, ``os.lstat``
+# n'est pas dans ``supports_dir_fd`` alors que ``os.stat`` l'est (avec ``supports_follow_symlinks``).
+_DIRFD_OPS = {os.link, os.mkdir, os.unlink, os.rmdir, os.stat, os.open}
+# R07-C : références CAPTURÉES À L'IMPORT (objets originaux). La garde de disponibilité teste ces objets, jamais un
+# attribut ``os.link``/``os.stat`` re-résolu — un monkeypatch de test sur ``os.link`` ne fausse donc plus la garde
+# (l'ancienne forme ``os.link in os.supports_follow_symlinks`` renvoyait à tort ``mecanisme_indisponible``).
+_FOLLOW_OPS = {os.link, os.stat}
+_O_DIR_NOFOLLOW = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _publish_dir_contents(src_fd: int, dst_fd: int, published: List[str], removed: List[str],
+                          prefix: str = "") -> None:
+    """Publie le CONTENU du répertoire ouvert ``src_fd`` dans ``dst_fd`` (nôtre, fraîchement créé, vide) par
+    primitives EXCLUSIVES relatives aux descripteurs. ``os.link`` (linkat, ``follow_symlinks=False``) et ``os.mkdir``
+    (mkdirat) lèvent ``FileExistsError`` si la cible existe déjà ⇒ **jamais de remplacement**. Un lien physique ne
+    duplique pas les octets. R07-B : ``published`` reçoit le chemin DÈS que le lien + l'identité (inode/dev) sont
+    établis à destination — AVANT toute tentative de ``os.unlink`` — ; ``removed`` ne le reçoit qu'APRÈS le retrait
+    réussi de l'ancien nom source. Si ``os.unlink`` échoue, le fichier reste sous LES DEUX noms : il figure dans
+    ``published`` mais PAS dans ``removed`` (état honnête, jamais faux par omission). Types admis : réguliers +
+    répertoires ; tout autre ⇒ ``_UnexpectedTransitEntry`` (jamais suivi/recopié)."""
+    for name in sorted(os.listdir(src_fd)):
+        st = os.stat(name, dir_fd=src_fd, follow_symlinks=False)   # fstatat, NE SUIT PAS un lien
+        rel = prefix + name
+        if stat.S_ISREG(st.st_mode):
+            os.link(name, name, src_dir_fd=src_fd, dst_dir_fd=dst_fd,
+                    follow_symlinks=False)                     # EEXIST si présent à destination ; ne suit pas un lien
+            ds = os.stat(name, dir_fd=dst_fd, follow_symlinks=False)   # identité établie à destination
+            if not (stat.S_ISREG(ds.st_mode) and ds.st_ino == st.st_ino and ds.st_dev == st.st_dev):
+                raise OSError("identité du fichier publié non établie: " + rel)   # aucun published/unlink dans ce cas
+            published.append(rel)                              # PUBLIÉ à destination (avant toute tentative d'unlink)
+            os.unlink(name, dir_fd=src_fd)                     # retrait de l'ancien nom (peut échouer ⇒ double nom)
+            removed.append(rel)                                # ancien nom RÉELLEMENT retiré
+        elif stat.S_ISDIR(st.st_mode):
+            os.mkdir(name, dir_fd=dst_fd)                      # création EXCLUSIVE (EEXIST-safe)
+            sub_src = os.open(name, _O_DIR_NOFOLLOW, dir_fd=src_fd)   # O_NOFOLLOW : refuse un répertoire aliasé par lien
+            try:
+                sub_dst = os.open(name, _O_DIR_NOFOLLOW, dir_fd=dst_fd)
+                try:
+                    _publish_dir_contents(sub_src, sub_dst, published, removed, rel + "/")
+                finally:
+                    os.close(sub_dst)
+            finally:
+                os.close(sub_src)
+            os.rmdir(name, dir_fd=src_fd)                      # sous-répertoire source vidé (rmdir ≠ rmtree)
+        else:
+            raise _UnexpectedTransitEntry(rel)                # lien symbolique / type spécial : refus explicite
+
+
+def _finalize_consult_transit(root: Path, target: Path, authorized_anchor: Path) -> Dict[str, Any]:
+    """Publie le transit ``root`` (``.staging-``) vers ``target`` (chemin déterministe) SANS remplacement (R-07).
+    Renvoie un dict de finalisation SANS ``provenance_durable`` (résolu par l'appelant selon le fait enregistré).
+    ``settled=True`` EXIGE une destination réellement établie par le chemin autorisé ; jamais via un alias/lien.
+
+    R07-A (rev7) : ``authorized_anchor`` est l'**origine autorisée DÉCLARÉE par l'appelant** (``consult`` passe la
+    racine d'état applicative :func:`_state_root`) — l'autorisation ne vient donc PAS d'un ``parent.parent`` dérivé du
+    chemin cible. On EXIGE que le parent (ex. ``pursuits/``) soit **directement sous cet ancrage** ; on ouvre l'ancrage
+    par chemin avec ``O_NOFOLLOW`` (son dernier composant ne peut être un lien), puis le PARENT **relativement à
+    l'ancrage** (encore ``O_NOFOLLOW``) ; ni l'ancre ni le parent ne sont atteints via un lien redirigé. Revendication
+    et ouvertures se font RELATIVEMENT au parent confiné — plus aucun ``os.mkdir(str(target))``/``os.open(str(target))``
+    absolu, et **aucun ``mkdir`` de parent par chemin** (le parent existe déjà : le transit vit dedans)."""
+    # R07-B : une cible lien symbolique n'est JAMAIS une finalisation (resolve()==resolve() ne suffit pas).
+    if target.is_symlink():
+        return {"settled": False, "reason": "cible_lien_symbolique", "transit_kept": str(root)}
+    # consult standalone passe TOUJOURS par un transit ``.staging-`` ; tout autre point de départ est indéterminé.
+    if not root.name.startswith(".staging-"):
+        return {"settled": False, "reason": "transit_inattendu", "transit_kept": str(root)}
+    # transit et destination doivent partager le même parent (invariant du parcours standalone).
+    if root.parent != target.parent:
+        return {"settled": False, "reason": "transit_inattendu", "transit_kept": str(root)}
+    # R07-A : le parent DOIT être directement sous l'ancrage AUTORISÉ déclaré (autorisation explicite, non dérivée).
+    if target.parent.parent != authorized_anchor:
+        return {"settled": False, "reason": "ancrage_non_autorise", "transit_kept": str(root)}
+    tname = target.name
+    rname = root.name
+    pname = target.parent.name
+    if (not tname) or ("/" in tname) or tname in (".", "..") or (not rname) or ("/" in rname) \
+            or (not pname) or ("/" in pname) or pname in (".", ".."):
+        return {"settled": False, "reason": "finalisation_impossible", "transit_kept": str(root)}
+    # Mécanisme requis : opérations relatives aux descripteurs + lien/stat exclusifs. Indisponible ⇒ échec explicite.
+    if not (_DIRFD_OPS <= os.supports_dir_fd and _FOLLOW_OPS <= os.supports_follow_symlinks):
+        return {"settled": False, "reason": "mecanisme_indisponible", "transit_kept": str(root)}
+    anchor = authorized_anchor                                # origine autorisée DÉCLARÉE (aucun mkdir de parent ici)
+    published: List[str] = []
+    removed: List[str] = []
+    anchor_fd = None
+    parent_fd = None
+    src_fd = None
+    dst_fd = None
+
+    def _partial(reason, exc=None):                            # état HONNÊTE : distingue publié / source retirée / double nom
+        info = {"settled": False, "reason": reason, "transit_kept": str(root), "target": str(target),
+                "published": list(published), "source_retired": list(removed),
+                "both_names": [p for p in published if p not in removed]}
+        if exc is not None:
+            info["error"] = _bound_diag(str(exc))
+        return info
+
+    try:
+        # R07-A (rev7) : ANCRAGE autorisé. Le parent (ex. ``pursuits``) et son ancêtre (ex. ``state``) ne doivent pas
+        # être atteints via un lien redirigé. On ouvre l'ANCRAGE (grand-parent) par chemin avec ``O_NOFOLLOW`` — son
+        # dernier composant ne peut donc être un lien — puis on ouvre le PARENT **relativement à ce descripteur**,
+        # encore ``O_NOFOLLOW`` : ni l'ancre ni le parent ne sont suivis comme lien. Revendication et ouvertures se
+        # font ensuite RELATIVEMENT au parent confiné. Les composants AU-DESSUS de l'ancrage sont la frontière de
+        # confiance applicative (racine d'état). Identité indéterminée / primitive indisponible ⇒ échec explicite.
+        try:
+            anchor_fd = os.open(str(anchor), _O_DIR_NOFOLLOW)   # ancrage : dernier composant garanti non-lien
+        except OSError as exc:
+            return {"settled": False, "reason": "finalisation_impossible",
+                    "transit_kept": str(root), "error": _bound_diag(str(exc))}
+        if not stat.S_ISDIR(os.fstat(anchor_fd).st_mode):
+            return {"settled": False, "reason": "finalisation_impossible", "transit_kept": str(root)}
+        try:
+            parent_fd = os.open(pname, _O_DIR_NOFOLLOW, dir_fd=anchor_fd)   # parent confiné SOUS l'ancrage (non-lien)
+        except OSError as exc:
+            return {"settled": False, "reason": "finalisation_impossible",
+                    "transit_kept": str(root), "error": _bound_diag(str(exc))}
+        if not stat.S_ISDIR(os.fstat(parent_fd).st_mode):
+            return {"settled": False, "reason": "finalisation_impossible", "transit_kept": str(root)}
+        try:
+            os.mkdir(tname, dir_fd=parent_fd)                 # REVENDICATION exclusive RELATIVE au parent confiné
+        except FileExistsError:
+            return {"settled": False, "reason": "destination_existante", "transit_kept": str(root)}
+        except OSError as exc:
+            return {"settled": False, "reason": "finalisation_impossible",
+                    "transit_kept": str(root), "error": _bound_diag(str(exc))}
+        try:
+            dst_fd = os.open(tname, _O_DIR_NOFOLLOW, dir_fd=parent_fd)   # ouverture RELATIVE, O_NOFOLLOW
+            src_fd = os.open(rname, _O_DIR_NOFOLLOW, dir_fd=parent_fd)   # transit sous le MÊME parent épinglé
+        except OSError as exc:
+            return {"settled": False, "reason": "finalisation_impossible",
+                    "transit_kept": str(root), "target": str(target), "error": _bound_diag(str(exc))}
+        try:
+            _publish_dir_contents(src_fd, dst_fd, published, removed)
+        except _UnexpectedTransitEntry as exc:
+            info = _partial("type_inattendu", exc); return info
+        except FileExistsError as exc:
+            info = _partial("collision_au_transfert", exc); return info   # jamais de remplacement
+        except OSError as exc:
+            info = _partial("finalisation_partielle", exc); return info   # unlink/link/identité : double nom possible
+        # transit vidé : suppression NON destructive du répertoire vide, RELATIVE au parent (jamais rmtree)
+        try:
+            os.rmdir(rname, dir_fd=parent_fd)
+        except OSError as exc:
+            info = _partial("transit_non_supprimable", exc); return info  # journal SOUS target ; jamais settle faux
+    finally:
+        for fd in (src_fd, dst_fd, parent_fd, anchor_fd):
+            if fd is not None:
+                os.close(fd)
+    return {"settled": True, "reason": None, "target": str(target),
+            "published": list(published), "source_retired": list(removed), "both_names": []}
 
 
 def _session_context(root: Path, *, budget_usd: float) -> RunContext:
@@ -574,5 +744,56 @@ def authorize(pursuit_ref: str, *, presented_spec_ref: str, presented_gate_finge
             "selected_option_id": match["selected_option_id"], "actor": stored["actor"]}
 
 
+def consult(capability: str, *, decision_source: str = "explicit_request", mode: str = "demo",
+            budget_usd: float = 2.0) -> Dict[str, Any]:
+    """Consultation **STANDALONE** d'une capacité typée (seam D-2 ; D-1 : aucun rattachement). Base **démo** dans les
+    deux modes (les facultés understanding/specification/build ne sont **jamais** invoquées par ``_consult`` ⇒ aucune
+    résolution cognitive facturable, aucun LLM/builder/subprocess) + capacité **observability RÉELLE** injectée
+    (Option B). Données réelles (lecture locale) dans les deux modes ; coût ``unavailable``. La provenance
+    ``ToolInvocation`` est écrite sous le répertoire **déterministe** de la Pursuit (transit → ``_settle_dir``),
+    donc **relisible après redémarrage**. ``Stores``/``RunContext`` inchangés (les stores obligatoires ne sont jamais
+    écrits par consult)."""
+    from brainai_app import providers                          # résolution de capacité (aucun fournisseur ici, I9)
+    root = _session_dir(None)                                  # standalone : répertoire de transit sous pursuits/
+    tool_store = ToolInvocationStore(root / "tinv.jsonl")      # provenance de session (lié dans la capacité, Option B)
+    caps = replace(demo_capabilities(),
+                   observability=providers.resolve_observability_capability(tool_store=tool_store))
+    stores = Stores(proposals=ProposalStore(root / "prop.jsonl"),
+                    specifications=SpecificationStore(root / "spec.jsonl"),
+                    builds=BuildStore(root / "build.jsonl"))   # requis par RunContext ; JAMAIS écrits par consult
+    ctx = RunContext(budget_usd=budget_usd, project_id="session",
+                     workspace=Workspace(root / "exec", "session"), stores=stores)
+    brain = BrainAI(caps)
+    t0 = time.monotonic()
+    outcome = brain.pursue(consult_intent(capability, decision_source=decision_source), context=ctx)  # SEUL appel moteur
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    vm = to_viewmodel(outcome, need=None, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
+    # R-07 (rev5) : publication de `consult` **sans remplacement au moment de l'opération**. La revendication
+    # ``os.mkdir(target)`` (exclusive) empêche déjà de remplacer une destination vide/non vide. Mais un
+    # ``exists()`` suivi d'un ``os.rename`` ordinaire garderait une fenêtre TOCTOU ; on publie donc le contenu par
+    # **primitives exclusives relatives aux descripteurs** — ``linkat`` (fichiers réguliers) et ``mkdirat``
+    # (répertoires), toutes deux **``FileExistsError`` si la cible existe déjà** — sans redirection possible d'un
+    # parent (voir :func:`_finalize_consult_transit`). Un lien physique **ne duplique pas** les octets : l'ancien
+    # nom source n'est retiré qu'APRÈS publication réussie ET identité (inode/dev) établie à destination. Types
+    # admis par consult : réguliers + répertoires ; tout **lien/symlink ou type spécial est REFUSÉ** (jamais suivi/
+    # recopié). Une cible ``target`` lien symbolique n'est **jamais** une finalisation. Aucun fallback vers rename/
+    # replace/copie ; FS différent ou mécanisme indisponible ⇒ **échec explicite, données conservées**. Sur panne
+    # tardive : état partiel **honnête** (``published`` = entrées réellement sous ``target`` ; reste sous
+    # ``transit_kept``), **aucun** rmtree/rollback/nettoyage/retry, cache **non réaffecté**, jamais ``settled=True``.
+    inv = vm.get("invocation") if isinstance(vm.get("invocation"), dict) else {}
+    recorded = (inv.get("provenance") == "recorded_and_referenced"
+                and isinstance(inv.get("tool_ref"), str) and bool(inv.get("tool_ref")))
+    target = _pursuit_dir(outcome.pursuit_id)
+    # R07-A : ancrage AUTORISÉ déclaré = racine d'état applicative (le parent ``pursuits/`` doit être directement dessous).
+    fin = _finalize_consult_transit(root, target, _state_root())   # publication exclusive sans remplacement (R-07)
+    if fin.get("settled"):
+        _remember(outcome.pursuit_id, target)                # cache → chemin déterministe UNIQUEMENT sur settle réel
+        fin["provenance_durable"] = bool(recorded)           # durable ⇔ fait réellement enregistré ET finalisation affirmée
+    else:
+        fin["provenance_durable"] = False                    # refus/panne/indétermination : jamais durable ; cache NON réaffecté
+    vm["finalization"] = fin
+    return vm
+
+
 __all__ = ["demo_capabilities", "real_capabilities", "to_viewmodel", "run_pursuit", "converse", "realize",
-           "authorize"]
+           "authorize", "consult"]

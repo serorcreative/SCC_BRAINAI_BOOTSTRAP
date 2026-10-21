@@ -387,6 +387,7 @@ def test_public_api_surface():
         "BrainAIError", "CapabilityInjectionError", "IntentError", "NeedError", "GovernanceError",
         "need_intent", "converse_intent", "realize_intent", "resume_intent", "validate_need",
         "validate_intent", "validate_run_context", "new_pursuit_id",
+        "consult_intent", "ObservabilityInvocationCapability",   # seam consult (L10/L11 — surface observability)
     }
 
 
