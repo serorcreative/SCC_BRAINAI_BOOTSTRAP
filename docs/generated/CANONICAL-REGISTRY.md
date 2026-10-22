@@ -7,7 +7,7 @@
 
 ## Comptages (calculés)
 
-- **Entrées totales** : 159
+- **Entrées totales** : 160
 - **Doctrines** : 30  ·  **ADR** : 8
 
 | Par kind | n |
@@ -18,7 +18,7 @@
 | component | 21 |
 | decision_owner | 11 |
 | doctrine | 30 |
-| evolution_record | 62 |
+| evolution_record | 63 |
 | invariant | 5 |
 | milestone | 15 |
 | ratification | 1 |
@@ -27,10 +27,10 @@
 
 | Catégorie | entrées |
 |---|---|
-| source_evidence | 143 |
+| source_evidence | 144 |
 | artifact_evidence | 5 |
-| test_evidence | 14 |
-| runtime_evidence | 14 |
+| test_evidence | 15 |
+| runtime_evidence | 15 |
 
 | Par migration_state | n |
 |---|---|
@@ -102,6 +102,7 @@
 | `DEC-09` | decision_owner | Objectif septembre 2026 = pilote commercial accompagné, pas un self-service public complet | gelée | o | o | — |
 | `DEC-10` | decision_owner | Réunification par lots atomiques (une seule implémentation active, tests, revue indépen… | gelée | o | o | — |
 | `DEC-11` | decision_owner | Pursuit = unité cognitive durable canonique ; Dossier reste une unité distincte de corr… | gelée | o | — | — |
+| `EVO-L11-CONSULT-RUNTIME-E2E-MERGED-2026-10-21` | evolution_record | Transition du jalon L11 (Consult Runtime E2E MIN) de 'present' vers 'merged' : PR #26 (… | merged | o | — | runtime |
 | `INV-APPEND-ONLY` | invariant | Faits append-only, immuables, tracés ; provenance/confiance/temporalité/révisions/révoc… | actif | — | — | src |
 | `INV-COGNITION-PROMPT` | invariant | La cognition générative est louée (providers) et pilotée par l'identité/prompt ; les mo… | actif | — | — | src |
 | `INV-PROVIDER-INTERCHANGEABLE` | invariant | Les LLM sont des ressources cognitives interchangeables ; jamais le siège de l'identité… | actif | — | — | src |
