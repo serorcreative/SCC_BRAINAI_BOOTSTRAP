@@ -49,11 +49,16 @@ def _system_clock() -> str:
 
 @dataclass
 class StepResult:
-    """Résultat **réel** d'une étape (renvoyé par son exécuteur). ``cost`` = coût réel ``{value,kind}`` ou None."""
+    """Résultat **réel** d'une étape (renvoyé par son exécuteur).
+
+    ``attempted`` indique si la frontière facturable a réellement été franchie : un refus local avant appel
+    reste traçable, mais ne consomme pas artificiellement la garde dure du nombre d'appels.
+    """
     status: str                                   # succeeded | failed
     detail: str = ""
     refs: Dict[str, Any] = field(default_factory=dict)   # ex. {"build_id":…, "verification_id":…}
     cost: Optional[Dict[str, Any]] = None
+    attempted: bool = True
 
 
 @dataclass
@@ -262,7 +267,7 @@ class BuildRunner:
                     return self._final
             self._step_fact(s.name, s.kind, STEP_RUNNING)
             result = s.run()                                  # exécution réelle (l'étape en vol termine)
-            if s.billable:
+            if s.billable and result.attempted:
                 self._budget.record_charge(result.cost, invocation_ref=result.refs.get("tool_ref"),
                                            label=s.name)
             terminal = STEP_SUCCEEDED if result.status == STEP_SUCCEEDED else STEP_FAILED

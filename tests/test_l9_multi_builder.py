@@ -22,10 +22,12 @@ from scc_brainai_bootstrap.builder.build_authorization import BuildAuthorization
 from scc_brainai_bootstrap.builder.cost_estimate import PROVIDER_CALL, estimate_costs, CostEstimateStore
 from scc_brainai_bootstrap.builder.local_site import (
     LocalDeterministicSiteAdapter, PROVIDER_NAME, render_index_html)
+from scc_brainai_bootstrap.builder.local_test import LocalDeterministicTestAdapter
 from scc_brainai_bootstrap.builder.site import SITE_ENTRYPOINT, produce_site_build
 from scc_brainai_bootstrap.builder.solution_architecture import SolutionArchitectureStore
 from scc_brainai_bootstrap.builder.specifications import SpecificationStore
 from scc_brainai_bootstrap.builder.tool_invocations import ToolInvocationStore
+from scc_brainai_bootstrap.builder.testing import TestResultStore
 from scc_brainai_bootstrap.builder.workspace import Workspace
 from scc_brainai_bootstrap.core.clock import digest
 
@@ -127,11 +129,13 @@ def test_run_delivery_with_local_builder_delivers(tmp_path):
     build_store = BuildStore(tmp_path / "b.jsonl")
     tool_store = ToolInvocationStore(tmp_path / "t.jsonl")
     rep = run_delivery(spec_source=_SPEC, workspace=_ws(tmp_path), project_id="site", pursuit_ref="p_l9",
-                       site_build=LocalDeterministicSiteAdapter(), preview=LocalPreviewAdapter(),
+                       site_build=LocalDeterministicSiteAdapter(), test_run=LocalDeterministicTestAdapter(),
+                       preview=LocalPreviewAdapter(),
                        budget=BudgetLedger(tmp_path / "bud.jsonl", ceiling_usd=1.0, max_calls=2),
                        build_store=build_store, tool_store=tool_store,
                        run_store=BuildRunStore(tmp_path / "r.jsonl"),
                        verification_store=VerificationStore(tmp_path / "v.jsonl"),
+                       test_result_store=TestResultStore(tmp_path / "tr.jsonl"),
                        delivered_store=DeliveredStore(tmp_path / "d.jsonl"), clock=CLOCK)
     assert rep["status"] == "delivered"
     builds = build_store.read_all()

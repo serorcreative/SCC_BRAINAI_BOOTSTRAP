@@ -175,7 +175,8 @@ def test_real_path_enforces_contract_conformance():
     for a in (caps.understanding, caps.specification, caps.build, caps.conversation):
         assert is_conformant(a)
     delivery = providers.real_delivery()
-    assert is_conformant(delivery.site_build) and is_conformant(delivery.preview)
+    assert (is_conformant(delivery.site_build) and is_conformant(delivery.test_run)
+            and is_conformant(delivery.preview))
 
 
 def test_resolve_capabilities_rejects_nonconformant_binder():
