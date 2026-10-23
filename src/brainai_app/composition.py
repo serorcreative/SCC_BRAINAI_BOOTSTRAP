@@ -33,6 +33,7 @@ from scc_brainai_bootstrap.builder.proposals import ProposalStore
 from scc_brainai_bootstrap.builder.solution_architecture import SolutionArchitectureStore
 from scc_brainai_bootstrap.builder.specifications import SpecificationStore
 from scc_brainai_bootstrap.builder.tool_invocations import ToolInvocationStore
+from scc_brainai_bootstrap.builder.testing import TestResultStore
 from scc_brainai_bootstrap.builder.turns import TurnStore
 from scc_brainai_bootstrap.builder.workspace import Workspace
 from brainai_app.delivery.budget import BudgetLedger
@@ -627,19 +628,21 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float,
     # inchangé) ; sinon sélection explicite (provider inconnu ⇒ ``LookupError`` fail-closed, aucun fallback). Ce
     # sélecteur ne contourne JAMAIS le verrou ci-dessus.
     delivery_caps = (providers.real_delivery() if build_provider is None
-                     else providers.real_delivery(build_provider=build_provider))   # site_build (+ preview)
+                     else providers.real_delivery(build_provider=build_provider))   # site_build + test_run + preview
     # Budget **gouverné** (RS-047) : env > défaut, source tracée ; ``budget_usd`` (réalisation) borne le plafond.
     budget_cfg = load_delivery_budget()
     ceiling = min(float(budget_usd), budget_cfg.ceiling_usd) if budget_usd else budget_cfg.ceiling_usd
     workspace = Workspace(root / "delivery_exec", "site")          # workspace dédié à la livraison (confiné)
     report = run_delivery(
         spec_source=spec_fact, workspace=workspace, project_id="site", pursuit_ref=outcome.pursuit_id,
-        site_build=delivery_caps.site_build, preview=delivery_caps.preview,
+        site_build=delivery_caps.site_build, test_run=delivery_caps.test_run,
+        preview=delivery_caps.preview,
         budget=BudgetLedger(root / "budget.jsonl", ceiling_usd=ceiling, max_calls=budget_cfg.max_calls),
         build_store=BuildStore(root / "site_build.jsonl"),
         tool_store=ToolInvocationStore(root / "tinv.jsonl"),
         run_store=BuildRunStore(root / "run_events.jsonl"),
         verification_store=VerificationStore(root / "verifications.jsonl"),
+        test_result_store=TestResultStore(root / "test_results.jsonl"),
         delivered_store=DeliveredStore(root / "delivered.jsonl"))
     report["budget_config"] = budget_cfg.to_dict()                # traçabilité gouvernée (RS-047)
 

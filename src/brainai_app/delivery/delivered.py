@@ -16,9 +16,11 @@ from scc_brainai_bootstrap.core.clock import short_id
 
 
 def build_delivered(*, pursuit_ref: str, artifact_ref: Any, preview_ref: Any,
-                    verification_ref: str, as_of: str, build_ref: Optional[str] = None) -> Dict[str, Any]:
+                    verification_ref: str, as_of: str, build_ref: Optional[str] = None,
+                    test_result_ref: Optional[str] = None,
+                    test_verification_ref: Optional[str] = None) -> Dict[str, Any]:
     """Construit un fait ``delivered`` immuable (pur, testable)."""
-    return {
+    fact = {
         "fact_type": "delivered",
         "pursuit_ref": pursuit_ref,
         "build_ref": build_ref,
@@ -27,6 +29,11 @@ def build_delivered(*, pursuit_ref: str, artifact_ref: Any, preview_ref: Any,
         "verification_ref": verification_ref,
         "as_of": as_of,
     }
+    if test_result_ref is not None:
+        fact["test_result_ref"] = test_result_ref
+    if test_verification_ref is not None:
+        fact["test_verification_ref"] = test_verification_ref
+    return fact
 
 
 class DeliveredStore:

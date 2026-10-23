@@ -272,7 +272,8 @@ def test_deliver_exposes_memory_11_id_and_alias(tmp_path, monkeypatch):
                                       "reason": None})
     monkeypatch.setattr(composition, "authorization_status", lambda *a, **k: "approved")
     monkeypatch.setattr(providers, "real_delivery",
-                        lambda: type("Caps", (), {"site_build": None, "preview": None})())
+                        lambda: type("Caps", (), {"site_build": None, "test_run": None,
+                                                  "preview": None})())
     monkeypatch.setattr(composition, "run_delivery",
                         lambda **kw: {"status": "delivered", "build": {"artefact": "a"},
                                       "preview_ref": "p", "provenance": {}})

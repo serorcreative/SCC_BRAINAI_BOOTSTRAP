@@ -25,6 +25,8 @@ from scc_brainai_bootstrap.builder.gemini_understanding import GeminiUnderstandi
 from scc_brainai_bootstrap.builder.openai_understanding import OpenAIUnderstandingAdapter
 from scc_brainai_bootstrap.builder.site import ClaudeCodeSiteAdapter
 from scc_brainai_bootstrap.builder.local_site import LocalDeterministicSiteAdapter, PROVIDER_NAME as LOCAL_BUILDER
+from scc_brainai_bootstrap.builder.local_test import (
+    LocalDeterministicTestAdapter, PROVIDER_NAME as LOCAL_TEST)
 from scc_brainai_bootstrap.builder.git_read import (
     LocalGitReadAdapter, GitReadHandle, PROVIDER_NAME as LOCAL_GIT,
     GIT_STATUS, GIT_DIFF, GIT_BRANCHES, GIT_READ_CAPABILITIES)
@@ -53,6 +55,7 @@ CAPABILITY_SLUGS = (UNDERSTAND_NEED, SPECIFY, BUILD_SOFTWARE, CONVERSE)
 
 # Capacités de **livraison** (J2) — build réel d'un site + preview locale substituable.
 BUILD_SITE = "build.site"
+TEST_RUN = "test.run"
 PREVIEW_LOCAL = "preview.local"
 # Capacité **différée** (jamais réalisée en J2) — le déploiement public est consigné RS-2/J3+ (RS-041).
 DEPLOY_PUBLIC = "deploy.public"
@@ -72,6 +75,9 @@ COGNITION_PROVIDERS = (CLAUDE_CODE, OPENAI, GEMINI)
 # reste le **défaut historique** (inchangé) ; ``deterministic_local`` (:data:`LOCAL_BUILDER`) est un 2ᵉ exécutant
 # **explicitement sélectionnable** (jamais un fallback automatique). Fail-closed hors de cet ensemble.
 BUILD_PROVIDERS = (CLAUDE_CODE, LOCAL_BUILDER)
+
+# TEST-RUN-SEAM-MIN — exécutant local déterministe unique ; aucun fallback implicite.
+TEST_RUN_PROVIDERS = (LOCAL_TEST,)
 
 # L10.1 — GitReadProviders admis pour les capacités de LECTURE git (classe R). ``local_git`` : exécutant local
 # déterministe (aucune remote, aucune credential ; network_required=false). Fail-closed hors de cet ensemble.
@@ -282,20 +288,24 @@ def resolve_understanding_cohort(providers: List[str]) -> Tuple[Any, ...]:
 @dataclass(frozen=True)
 class DeliveryCapabilities:
     """Capacités de la **livraison réelle** (post-``realize``), résolues par le registre (jamais câblées dans la
-    logique métier) : ``site_build`` (le fournisseur écrit de vrais fichiers) et ``preview`` (surface locale
-    substituable). ``deploy.public`` reste **différé** (RS-2/J3+) — non résolu ici."""
+    logique métier) : ``site_build`` (écrit les fichiers), ``test_run`` (vérifie l'artefact) et ``preview``
+    (surface locale substituable). ``deploy.public`` reste **différé** (RS-2/J3+) — non résolu ici."""
 
     site_build: Any
+    test_run: Any
     preview: Any
 
 
 def delivery_descriptors() -> List[AgentDescriptor]:
-    """Descriptors de livraison : ``build.site`` → ``claude_code`` ; ``preview.local`` → ``local_loopback``.
+    """Descriptors de livraison : build, test local déterministe, puis preview locale.
     ``cost`` reste **None** (le budget réel vit dans le ``BudgetLedger`` du run, pas dans le descriptor)."""
     return [
         AgentDescriptor(id=f"brainai.{CLAUDE_CODE}.{BUILD_SITE.replace('.', '_')}", namespace="brainai",
                         name=f"{CLAUDE_CODE}:{BUILD_SITE}", capabilities=[BUILD_SITE], state=AgentState.ACTIVE,
                         provider=CLAUDE_CODE, availability="available", cost=None, priority=0),
+        AgentDescriptor(id=f"brainai.{LOCAL_TEST}.{TEST_RUN.replace('.', '_')}", namespace="brainai",
+                        name=f"{LOCAL_TEST}:{TEST_RUN}", capabilities=[TEST_RUN], state=AgentState.ACTIVE,
+                        provider=LOCAL_TEST, availability="available", cost=None, priority=0),
         AgentDescriptor(id=f"brainai.{LOCAL_LOOPBACK}.{PREVIEW_LOCAL.replace('.', '_')}", namespace="brainai",
                         name=f"{LOCAL_LOOPBACK}:{PREVIEW_LOCAL}", capabilities=[PREVIEW_LOCAL],
                         state=AgentState.ACTIVE, provider=LOCAL_LOOPBACK, availability="available",
@@ -320,6 +330,7 @@ def delivery_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
     wd = load_call_watchdog().timeout_s          # watchdog de sécurité gouverné (défaut 3600 s), pas un cutoff cognitif
     return {
         (CLAUDE_CODE, BUILD_SITE): lambda: ClaudeCodeSiteAdapter(model="haiku", max_budget_usd=0.50, timeout=wd),
+        (LOCAL_TEST, TEST_RUN): lambda: LocalDeterministicTestAdapter(),
         (LOCAL_LOOPBACK, PREVIEW_LOCAL): lambda: LocalPreviewAdapter(),
     }
 
@@ -329,10 +340,12 @@ def resolve_delivery(descriptors: List[AgentDescriptor],
     """Résout les capacités de livraison **via le registre** (aucun fournisseur connu de l'appelant). **Rejet
     structurel** (T2) des adaptateurs à contrat incomplet via ``require_contract``."""
     site_build = resolve_capability(BUILD_SITE, descriptors, binders)
+    test_run = resolve_capability(TEST_RUN, descriptors, binders)
     preview = resolve_capability(PREVIEW_LOCAL, descriptors, binders)
     require_contract(site_build)
+    require_contract(test_run)
     require_contract(preview)
-    return DeliveryCapabilities(site_build=site_build, preview=preview)
+    return DeliveryCapabilities(site_build=site_build, test_run=test_run, preview=preview)
 
 
 # --------------------------------------------------------------------- #
@@ -374,19 +387,46 @@ def resolve_build_site(provider: str = CLAUDE_CODE) -> Any:
     return impl
 
 
-def real_delivery(build_provider: Optional[str] = None) -> DeliveryCapabilities:
+def test_run_descriptors(provider: str = LOCAL_TEST) -> List[AgentDescriptor]:
+    """Descriptor de ``test.run`` pour un provider explicitement admis."""
+    return [
+        AgentDescriptor(id=f"brainai.{provider}.{TEST_RUN.replace('.', '_')}", namespace="brainai",
+                        name=f"{provider}:{TEST_RUN}", capabilities=[TEST_RUN], state=AgentState.ACTIVE,
+                        provider=provider, availability="available", cost=None, priority=0),
+    ]
+
+
+def test_run_binders() -> Dict[Tuple[str, str], Callable[[], Any]]:
+    """Binder du test statique local déterministe, sans réseau/LLM/credential."""
+    return {(LOCAL_TEST, TEST_RUN): lambda: LocalDeterministicTestAdapter()}
+
+
+def resolve_test_run(provider: str = LOCAL_TEST) -> Any:
+    """Résout ``test.run`` fail-closed ; aucun provider inconnu n'est substitué silencieusement."""
+    if provider not in TEST_RUN_PROVIDERS:
+        raise LookupError(f"TestRunProvider inconnu : {provider!r} (attendu ∈ {TEST_RUN_PROVIDERS})")
+    impl = resolve_capability(TEST_RUN, test_run_descriptors(provider), test_run_binders())
+    require_contract(impl)
+    return impl
+
+
+def real_delivery(build_provider: Optional[str] = None,
+                  test_provider: Optional[str] = None) -> DeliveryCapabilities:
     """Capacités de livraison **réelles** (site + preview locale). ``build_provider`` = **sélecteur opaque** L9 du
     BuildProvider de ``build.site`` :
     - **absent** (``None``) ⇒ chemin **historique strictement inchangé** (défaut ``claude_code``) ;
     - **1 nom admis** ⇒ sélection **explicite** de cet exécutant (jamais remplacé, **aucun fallback**) ;
     - **nom hors** :data:`BUILD_PROVIDERS` ⇒ ``LookupError`` (fail-closed).
     La preview reste ``local_loopback`` dans tous les cas."""
-    if build_provider is None:
+    if build_provider is None and test_provider is None:
         return resolve_delivery(delivery_descriptors(), delivery_binders())    # historique inchangé
-    site_build = resolve_build_site(build_provider)                            # sélection explicite (fail-closed)
+    selected_build = CLAUDE_CODE if build_provider is None else build_provider
+    selected_test = LOCAL_TEST if test_provider is None else test_provider
+    site_build = resolve_build_site(selected_build)                            # sélection explicite (fail-closed)
+    test_run = resolve_test_run(selected_test)                                 # défaut local, fail-closed
     preview = resolve_capability(PREVIEW_LOCAL, delivery_descriptors(), delivery_binders())
     require_contract(preview)
-    return DeliveryCapabilities(site_build=site_build, preview=preview)
+    return DeliveryCapabilities(site_build=site_build, test_run=test_run, preview=preview)
 
 
 # --------------------------------------------------------------------- #
@@ -547,14 +587,16 @@ def resolve_observability_capability(*, tool_store: Any) -> _BoundObservabilityC
 
 __all__ = ["OBS_HEALTH", "OBSERVABILITY_READ_CAPABILITIES", "LOCAL_CONTROL_PLANE", "OBSERVABILITY_READ_PROVIDERS", "observability_read_descriptors", "observability_read_binders", "resolve_observability_read", "resolve_observability_capability", "UNDERSTAND_NEED", "SPECIFY", "BUILD_SOFTWARE", "CONVERSE", "CAPABILITY_SLUGS", "CLAUDE_CODE",
            "OPENAI", "GEMINI", "COGNITION_PROVIDERS",
-           "BUILD_SITE", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
+           "BUILD_SITE", "TEST_RUN", "PREVIEW_LOCAL", "DEPLOY_PUBLIC", "LOCAL_LOOPBACK",
            "LOCAL_BUILDER", "BUILD_PROVIDERS",
+           "LOCAL_TEST", "TEST_RUN_PROVIDERS",
            "default_descriptors", "default_binders", "resolve_capability", "resolve_capabilities",
            "real_capabilities", "understanding_descriptors", "understanding_binders", "resolve_understanding",
            "resolve_understanding_cohort",
            "DeliveryCapabilities", "delivery_descriptors", "delivery_binders",
            "deferred_deploy_public_descriptor", "resolve_delivery", "real_delivery",
            "build_site_descriptors", "build_site_binders", "resolve_build_site",
+           "test_run_descriptors", "test_run_binders", "resolve_test_run",
            "LOCAL_GIT", "GIT_READ_PROVIDERS", "GIT_STATUS", "GIT_DIFF", "GIT_BRANCHES", "GIT_READ_CAPABILITIES",
            "git_read_descriptors", "git_read_binders", "resolve_git_read",
            "GIT_WRITE_PROVIDERS", "GIT_BRANCH_CREATE", "GIT_COMMIT", "GIT_WRITE_CAPABILITIES",

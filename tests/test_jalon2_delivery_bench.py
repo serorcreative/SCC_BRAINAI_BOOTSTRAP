@@ -26,6 +26,7 @@ from brainai_app.delivery.verify import VerificationStore, is_verified, verify_h
 from scc_brainai_bootstrap.builder.builds import BuildStore
 from scc_brainai_bootstrap.builder.site import SITE_ENTRYPOINT, collect_artifacts, produce_site_build
 from scc_brainai_bootstrap.builder.tool_invocations import ToolInvocationStore
+from scc_brainai_bootstrap.builder.testing import TestResultStore
 from scc_brainai_bootstrap.builder.workspace import Workspace, WorkspaceError
 
 CLOCK = lambda: "2026-08-21T00:00:00+00:00"  # noqa: E731 (horloge figée pour le déterminisme)
@@ -102,6 +103,15 @@ class FakePreview:
         return WorkspacePreview(workspace, entrypoint=entrypoint).start()
 
 
+class FakeTestRun:
+    """Capacité test.run factice déterministe, sans subprocess ni réseau."""
+    capability = "test.run"; name = "fake_test"
+
+    def run(self, *, cwd, artifact_ref):
+        return {"called": True, "argv": ["fake-test"], "exit_code": 0,
+                "timed_out": False, "stdout": "passed", "stderr": ""}
+
+
 def _ws(tmp_path):
     ws = Workspace(tmp_path / "exec", "site"); ws.ensure(); return ws
 
@@ -111,6 +121,7 @@ def _stores(tmp_path):
                 tool_store=ToolInvocationStore(tmp_path / "t.jsonl"),
                 run_store=BuildRunStore(tmp_path / "r.jsonl"),
                 verification_store=VerificationStore(tmp_path / "v.jsonl"),
+                test_result_store=TestResultStore(tmp_path / "tr.jsonl"),
                 delivered_store=DeliveredStore(tmp_path / "d.jsonl"))
 
 
@@ -263,7 +274,8 @@ def test_budget_exhausted_stops_run_real(tmp_path):
     budget = BudgetLedger(tmp_path / "bud.jsonl", ceiling_usd=0.30, max_calls=5)
     fake = FakeSite(cost=0.5)
     rep = run_delivery(spec_source=_SPEC, workspace=_ws(tmp_path), project_id="site", pursuit_ref="p1",
-                       site_build=fake, preview=LocalPreviewAdapter(), budget=budget, clock=CLOCK, **st)
+                       site_build=fake, test_run=FakeTestRun(), preview=LocalPreviewAdapter(),
+                       budget=budget, clock=CLOCK, **st)
     assert rep["status"] == "budget_exhausted"
     assert fake.calls == 0                                      # jamais appelé (pré-garde)
     assert any(e["fact_type"] == "budget_exhausted" for e in budget.read_all())
@@ -355,7 +367,7 @@ def test_resume_is_new_run_referencing_previous(tmp_path):
 def test_full_delivery_delivered_fact_and_provenance(tmp_path):
     st = _stores(tmp_path)
     rep = run_delivery(spec_source=_SPEC, workspace=_ws(tmp_path), project_id="site", pursuit_ref="p_ok",
-                       site_build=FakeSite(), preview=LocalPreviewAdapter(),
+                       site_build=FakeSite(), test_run=FakeTestRun(), preview=LocalPreviewAdapter(),
                        budget=BudgetLedger(tmp_path / "bud.jsonl", ceiling_usd=3.0, max_calls=2),
                        clock=CLOCK, **st)
     assert rep["status"] == "delivered"
@@ -388,7 +400,7 @@ def test_preview_capability_substitutable_fake_provider(tmp_path):
     st = _stores(tmp_path)
     fake_prev = FakePreview()
     rep = run_delivery(spec_source=_SPEC, workspace=_ws(tmp_path), project_id="site", pursuit_ref="p_sub",
-                       site_build=FakeSite(), preview=fake_prev,
+                       site_build=FakeSite(), test_run=FakeTestRun(), preview=fake_prev,
                        budget=BudgetLedger(tmp_path / "bud.jsonl", ceiling_usd=3.0, max_calls=2),
                        clock=CLOCK, **st)
     assert rep["status"] == "delivered" and fake_prev.opened == 1
