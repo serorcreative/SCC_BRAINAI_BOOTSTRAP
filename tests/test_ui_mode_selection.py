@@ -45,9 +45,9 @@ def test_no_hardcoded_mode_in_network_calls(html: str):
 def test_converse_and_realize_send_selected_mode(html: str):
     # les deux appels que l'UI émet réellement transmettent le mode SÉLECTIONNÉ
     converse = re.search(r'kind:\s*"converse".*?mode:\s*selectedMode\(\)', html, re.S)
-    realize = re.search(r'kind:\s*"realize".*?mode:\s*selectedMode\(\)', html, re.S)
+    realize = re.search(r'kind:\s*"workflow".*?mode:\s*selectedMode\(\)', html, re.S)
     assert converse, "l'appel converse doit transmettre selectedMode()"
-    assert realize, "l'appel realize doit transmettre selectedMode()"
+    assert realize, "le workflow de préparation doit transmettre selectedMode()"
 
 
 def test_every_post_mode_is_dynamic(html: str):

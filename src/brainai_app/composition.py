@@ -687,7 +687,8 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float,
 
 
 def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
-            actor: Any = None, build_provider: Optional[str] = None) -> Dict[str, Any]:
+            actor: Any = None, build_provider: Optional[str] = None,
+            prepare_only: bool = False) -> Dict[str, Any]:
     """**Confirmation humaine** : poursuit la **même** Pursuit vers l'arc. Le besoin (``matured_need``) est relu
     **côté moteur** depuis les tours ; l'UI n'en fournit aucun. ``actor`` = identité **déclarée** (non vérifiée)
     à l'origine de la confirmation ; enregistrée comme fait ``convergence_confirmed`` séparé (D3). En mode
@@ -708,7 +709,7 @@ def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
     root = _settle_dir(root, outcome.pursuit_id)                 # no-op hors transit (realize a toujours un pursuit_ref)
     _remember(outcome.pursuit_id, root)
     vm = to_viewmodel(outcome, need=None, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
-    if mode == "real" and outcome.state == "awaiting" and outcome.wait_reason == "governance":
+    if not prepare_only and mode == "real" and outcome.state == "awaiting" and outcome.wait_reason == "governance":
         delivery = _deliver(root, outcome, actor=actor, budget_usd=budget_usd,
                             build_provider=build_provider)
         if delivery is not None:

@@ -213,3 +213,33 @@ jobs:
 
       - name: Registre canonique — validation SANS régénération
         run: python scripts/generate_canonical_registry.py --check
+
+      # Recette UI : cognition de test, construction/verification/memoire locales.
+      # Aucune cle fournisseur et aucun deploiement public.
+      - name: Node pour la recette navigateur
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Installer Playwright et Chromium de recette
+        timeout-minutes: 10
+        run: |
+          npm install --prefix "$RUNNER_TEMP/brainai-browser" --no-save --no-package-lock playwright@1.62.1
+          node "$RUNNER_TEMP/brainai-browser/node_modules/playwright/cli.js" install --with-deps chromium
+
+      - name: Parcours navigateur BrainAI (0 LLM)
+        timeout-minutes: 5
+        env:
+          BRAINAI_UI_BROWSER_TEST: "1"
+          BRAINAI_UI_ARTIFACTS: ${{ runner.temp }}/brainai-ui-captures
+          NODE_PATH: ${{ runner.temp }}/brainai-browser/node_modules
+        run: python -m pytest -p no:cacheprovider -q -o addopts='' tests/test_runtime_browser.py
+
+      - name: Captures de recette UI (donnees synthetiques)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainai-ui-captures
+          path: ${{ runner.temp }}/brainai-ui-captures/*.png
+          if-no-files-found: ignore
+          retention-days: 7

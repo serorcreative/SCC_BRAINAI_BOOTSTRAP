@@ -143,9 +143,9 @@ def test_get_root_serves_welcome_page(live_server):
     # panneau système
     assert "BrainAI Version" in html and "Version du contrat" in html and "Mode d'exécution" in html
     # dialogue multi-tour : envoie converse, garde le pursuit_id, propose la réalisation, appelle realize
-    assert 'kind: "converse"' in html and 'kind: "realize"' in html
+    assert 'kind: "converse"' in html and 'workflow("prepare"' in html
     assert "currentPursuitId" in html and "pursuit_ref" in html
-    assert "Lancer la réalisation" in html                                # action de confirmation visible
+    assert "Préparer la proposition" in html
 
 
 def test_contract_endpoint_requires_token(live_server):
