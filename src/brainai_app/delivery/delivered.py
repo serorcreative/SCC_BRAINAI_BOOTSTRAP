@@ -18,7 +18,9 @@ from scc_brainai_bootstrap.core.clock import short_id
 def build_delivered(*, pursuit_ref: str, artifact_ref: Any, preview_ref: Any,
                     verification_ref: str, as_of: str, build_ref: Optional[str] = None,
                     test_result_ref: Optional[str] = None,
-                    test_verification_ref: Optional[str] = None) -> Dict[str, Any]:
+                    test_verification_ref: Optional[str] = None,
+                    correction_ref: Optional[str] = None, parent_run_ref: Optional[str] = None,
+                    workspace_ref: Optional[str] = None) -> Dict[str, Any]:
     """Construit un fait ``delivered`` immuable (pur, testable)."""
     fact = {
         "fact_type": "delivered",
@@ -33,6 +35,9 @@ def build_delivered(*, pursuit_ref: str, artifact_ref: Any, preview_ref: Any,
         fact["test_result_ref"] = test_result_ref
     if test_verification_ref is not None:
         fact["test_verification_ref"] = test_verification_ref
+    if correction_ref is not None:
+        fact.update(correction_ref=correction_ref, parent_run_ref=parent_run_ref,
+                    workspace_ref=workspace_ref)
     return fact
 
 
