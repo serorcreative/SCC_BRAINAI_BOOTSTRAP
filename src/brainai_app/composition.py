@@ -53,6 +53,12 @@ from brainai_app.delivery.budget_config import load_delivery_budget
 # Jalon du moteur exposé à l'UI (informationnel) — première faculté : Need→Understanding→Specification→Build.
 BRAINAI_VERSION = "arc-propose-001"
 
+
+def propose_learning() -> Dict[str, Any]:
+    """Raccord explicite Memory-11 → Learning-12 ; propositions uniquement."""
+    from brainai_app.learning import propose_from_deliveries
+    return propose_from_deliveries(_state_root())
+
 # Libellés lisibles des livrables — **avec repli** sur le nom de faculté (agnostique au nombre de facultés).
 _LABELS = {"understanding": "Brief", "specification": "Specification", "build": "Manifest"}
 # Verbe d'action « en cours » pour l'affichage vivant — même repli sur le nom de faculté.
@@ -952,4 +958,4 @@ def consult(capability: str, *, decision_source: str = "explicit_request", mode:
 
 __all__ = ["demo_capabilities", "real_capabilities", "to_viewmodel", "run_pursuit", "converse", "realize",
            "authorize", "consult", "resume", "propose_delivery_correction", "authorize_delivery_correction",
-           "execute_delivery_correction"]
+           "execute_delivery_correction", "propose_learning"]
