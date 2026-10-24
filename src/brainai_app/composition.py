@@ -561,7 +561,8 @@ def _spec_fact_for(stores: Stores, outcome: Any) -> Optional[Dict[str, Any]]:
 
 
 def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float,
-             build_provider: Optional[str] = None) -> Optional[Dict[str, Any]]:
+             build_provider: Optional[str] = None,
+             correction_ref: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Livraison **réelle** post-arc (JALON 2) : build confiné du site → preview locale → vérification HTTP 200
     (liée au hash) → fait ``delivered`` → **écriture mémoire minimale** (T5, depuis l'app uniquement). Ne s'exécute
     qu'après un arc **réussi** (``awaiting``/``governance``). Renvoie un résumé, ou ``None`` si non applicable."""
@@ -633,7 +634,7 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float,
     budget_cfg = load_delivery_budget()
     ceiling = min(float(budget_usd), budget_cfg.ceiling_usd) if budget_usd else budget_cfg.ceiling_usd
     workspace = Workspace(root / "delivery_exec", "site")          # workspace dédié à la livraison (confiné)
-    report = run_delivery(
+    delivery_args = dict(
         spec_source=spec_fact, workspace=workspace, project_id="site", pursuit_ref=outcome.pursuit_id,
         site_build=delivery_caps.site_build, test_run=delivery_caps.test_run,
         preview=delivery_caps.preview,
@@ -644,6 +645,22 @@ def _deliver(root: Path, outcome: Any, *, actor: Any, budget_usd: float,
         verification_store=VerificationStore(root / "verifications.jsonl"),
         test_result_store=TestResultStore(root / "test_results.jsonl"),
         delivered_store=DeliveredStore(root / "delivered.jsonl"))
+    if correction_ref is None:
+        report = run_delivery(**delivery_args)
+    else:
+        from brainai_app.delivery.corrections import CorrectionError, correction_attempt
+        try:
+            with correction_attempt(root=root, pursuit_ref=outcome.pursuit_id,
+                                    correction_id=correction_ref, spec=spec_fact,
+                                    gate_fingerprint=current_fp, ceiling_usd=ceiling,
+                                    max_calls=budget_cfg.max_calls, build_provider=build_provider) as attempt:
+                delivery_args.update(workspace=attempt['workspace'],
+                                     parent_run_ref=attempt['parent_run_ref'], correction_ref=correction_ref,
+                                     workspace_ref=str(attempt['workspace'].path.relative_to(root.resolve())))
+                report = run_delivery(**delivery_args)
+                attempt.update(run_ref=report['provenance'].get('run_id'), status=report['status'])
+        except CorrectionError as exc:
+            return {'status': 'refused', 'reason': str(exc), 'significant_construction': False}
     report["budget_config"] = budget_cfg.to_dict()                # traçabilité gouvernée (RS-047)
 
     # T5 — écriture mémoire minimale, DEPUIS l'app uniquement, sur succès (écriture seule, aucune récupération).
@@ -686,10 +703,111 @@ def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
     _remember(outcome.pursuit_id, root)
     vm = to_viewmodel(outcome, need=None, mode=mode, budget_usd=budget_usd, elapsed_ms=elapsed_ms)
     if mode == "real" and outcome.state == "awaiting" and outcome.wait_reason == "governance":
-        delivery = _deliver(root, outcome, actor=actor, budget_usd=budget_usd, build_provider=build_provider)
+        delivery = _deliver(root, outcome, actor=actor, budget_usd=budget_usd,
+                            build_provider=build_provider)
         if delivery is not None:
             vm["delivery"] = delivery
     return vm
+
+
+def propose_delivery_correction(pursuit_ref: str, *, parent_run_ref: str,
+                                test_result_ref: str, suggestion: str) -> Dict[str, Any]:
+    """Prépare une proposition inerte depuis les preuves d'une session existante.
+
+    Première surface Python du lot correctif ; ne matérialise pas une session
+    absente et ne donne aucune permission de reconstruire ou de retester.
+    """
+    import re
+    from brainai_app.delivery.corrections import CorrectionError, propose_correction
+
+    if not isinstance(pursuit_ref, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', pursuit_ref):
+        return {"status": "refused", "reason": "pursuit_ref_invalide"}
+    with _SESSIONS_LOCK:
+        root = _SESSIONS.get(pursuit_ref)
+    if root is None:
+        root = _pursuit_dir(pursuit_ref)
+        if not root.exists():
+            root = _legacy_lookup(pursuit_ref)
+    if root is None or not root.is_dir():
+        return {"status": "refused", "reason": "session_absente"}
+    try:
+        fact = propose_correction(root=root, pursuit_ref=pursuit_ref,
+                                  parent_run_ref=parent_run_ref, test_result_ref=test_result_ref,
+                                  suggestion=suggestion)
+    except CorrectionError as exc:
+        return {"status": "refused", "reason": str(exc)}
+    return {"status": "proposed", "correction": fact, "execution_authorized": False}
+
+
+def authorize_delivery_correction(pursuit_ref: str, *, correction_ref: str,
+                                  presented_spec_ref: str, presented_gate_fingerprint: str,
+                                  decision: str, budget_usd: float = 2.0,
+                                  build_provider: Optional[str] = None, actor: Any = None) -> Dict[str, Any]:
+    """Accord correctif inerte, après le GO du Cost Gate, pour une seule tentative.
+
+    Le budget approuvé est le plafond total partagé avec les tentatives passées.
+    La spécification corrigée doit déjà avoir été présentée puis autorisée.
+    """
+    import re
+    from brainai_app.delivery.corrections import CorrectionError, authorize_correction
+    if not isinstance(pursuit_ref, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', pursuit_ref):
+        return {'status': 'refused', 'reason': 'pursuit_ref_invalide'}
+    with _SESSIONS_LOCK:
+        root = _SESSIONS.get(pursuit_ref)
+    if root is None:
+        root = _pursuit_dir(pursuit_ref)
+        if not root.exists():
+            root = _legacy_lookup(pursuit_ref)
+    if root is None or not root.is_dir():
+        return {'status': 'refused', 'reason': 'session_absente'}
+    cfg = load_delivery_budget()
+    ceiling = min(float(budget_usd), cfg.ceiling_usd) if budget_usd else cfg.ceiling_usd
+    try:
+        fact = authorize_correction(root=root, pursuit_ref=pursuit_ref, correction_id=correction_ref,
+                                    spec_ref=presented_spec_ref, gate_fingerprint=presented_gate_fingerprint,
+                                    decision=decision, ceiling_usd=ceiling, max_calls=cfg.max_calls,
+                                    build_provider=build_provider, actor=actor)
+    except CorrectionError as exc:
+        return {'status': 'refused', 'reason': str(exc)}
+    return {'status': 'recorded', 'decision': decision, 'authorization': fact}
+
+
+def execute_delivery_correction(pursuit_ref: str, *, correction_ref: str,
+                                presented_spec_ref: str, presented_gate_fingerprint: str,
+                                budget_usd: float = 2.0, build_provider: Optional[str] = None,
+                                actor: Any = None) -> Dict[str, Any]:
+    """Reconstruit une spec corrigée déjà produite et autorisée, une seule fois.
+
+    Raccord Python explicite : aucun nouvel appel cognitif pour redécouvrir la
+    spec autorisée. Les références présentées et les sources persistées sont
+    revérifiées ; la livraison et l'écriture Memory-11 restent celles de _deliver.
+    """
+    import re
+    from types import SimpleNamespace
+    from brainai_app.delivery.corrections import CorrectionError, correction_target
+    if not isinstance(pursuit_ref, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', pursuit_ref):
+        return {'status': 'refused', 'reason': 'pursuit_ref_invalide'}
+    with _SESSIONS_LOCK:
+        root = _SESSIONS.get(pursuit_ref)
+    if root is None:
+        root = _pursuit_dir(pursuit_ref)
+        if not root.exists():
+            root = _legacy_lookup(pursuit_ref)
+    if root is None or not root.is_dir():
+        return {'status': 'refused', 'reason': 'session_absente'}
+    try:
+        spec, build_ref = correction_target(root, pursuit_ref, presented_spec_ref,
+                                            presented_gate_fingerprint)
+    except CorrectionError as exc:
+        return {'status': 'refused', 'reason': str(exc)}
+    # Projection des faits existants, jamais un nouveau manifeste ou un GO synthétique.
+    outcome = SimpleNamespace(
+        pursuit_id=pursuit_ref, as_of=datetime.now(timezone.utc).isoformat(), need=None,
+        steps=[{'faculty': 'specification', 'status': 'proposed', 'fact_id': spec['specification_id']},
+               {'faculty': 'build', 'status': 'proposed', 'fact_id': build_ref}],
+        proposal={'cost_gate': {'gate_fingerprint': presented_gate_fingerprint}})
+    return _deliver(root, outcome, actor=actor, budget_usd=budget_usd,
+                    build_provider=build_provider, correction_ref=correction_ref)
 
 
 def authorize(pursuit_ref: str, *, presented_spec_ref: str, presented_gate_fingerprint: str,
@@ -799,4 +917,5 @@ def consult(capability: str, *, decision_source: str = "explicit_request", mode:
 
 
 __all__ = ["demo_capabilities", "real_capabilities", "to_viewmodel", "run_pursuit", "converse", "realize",
-           "authorize", "consult"]
+           "authorize", "consult", "propose_delivery_correction", "authorize_delivery_correction",
+           "execute_delivery_correction"]

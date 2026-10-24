@@ -36,6 +36,8 @@ def run_delivery(*, spec_source: Dict[str, Any], workspace: Any, project_id: str
                  build_store: Any, tool_store: Any, run_store: BuildRunStore,
                  verification_store: VerificationStore, test_result_store: Any,
                  delivered_store: DeliveredStore,
+                 parent_run_ref: Optional[str] = None, correction_ref: Optional[str] = None,
+                 workspace_ref: Optional[str] = None,
                  config: Any = None, entrypoint: str = SITE_ENTRYPOINT,
                  clock: Callable[[], str] = _system_clock) -> Dict[str, Any]:
     """Livre **réellement** une Spéc confirmée. Renvoie un rapport :
@@ -125,10 +127,13 @@ def run_delivery(*, spec_source: Dict[str, Any], workspace: Any, project_id: str
     ]
 
     runner = BuildRunner(run_store, budget, pursuit_ref=pursuit_ref, clock=clock, config=config,
-                         prev_run_ref=(interrupted[0]["run_ref"] if interrupted else None))
+                         prev_run_ref=(parent_run_ref or (interrupted[0]["run_ref"] if interrupted else None)))
     run_out = runner.run(steps)
 
     provenance: Dict[str, Any] = {}
+    if correction_ref:
+        provenance.update(correction_id=correction_ref, parent_run_ref=parent_run_ref,
+                          workspace_ref=workspace_ref)
     build_fact = ctx.get("build_fact")
     test_result = ctx.get("test_result")
     test_verification = ctx.get("test_verification")
@@ -143,7 +148,7 @@ def run_delivery(*, spec_source: Dict[str, Any], workspace: Any, project_id: str
         provenance["test_tool_ref"] = test_result.get("tool_ref")
     if test_verification:
         provenance["test_verification_id"] = test_verification.get("verification_id")
-    provenance["run_id"] = run_out.get("steps") and getattr(runner, "_run_id", None)
+    provenance["run_id"] = getattr(runner, "_run_id", None)
 
     report: Dict[str, Any] = {"status": "failed", "run": run_out, "provenance": provenance,
                               "interrupted": [i.get("event_id") for i in interrupted],
@@ -161,7 +166,8 @@ def run_delivery(*, spec_source: Dict[str, Any], workspace: Any, project_id: str
             verification_ref=verification.get("verification_id"),
             build_ref=(build_fact or {}).get("build_id"),
             test_result_ref=(test_result or {}).get("test_result_id"),
-            test_verification_ref=test_verification.get("verification_id"), as_of=as_of))
+            test_verification_ref=test_verification.get("verification_id"), as_of=as_of,
+            correction_ref=correction_ref, parent_run_ref=parent_run_ref, workspace_ref=workspace_ref))
         provenance["delivered_id"] = delivered.get("delivered_id")
         report.update({"status": "delivered", "delivered": delivered})
     elif run_out.get("budget_exhausted"):
