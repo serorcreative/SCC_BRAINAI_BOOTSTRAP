@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from scc_brainai_bootstrap.builder.brainai import (
     BrainAI, Capabilities, RunContext, Stores, _bound_diag, consult_intent, converse_intent, need_intent,
-    realize_intent)
+    realize_intent, resume_intent)
 from scc_brainai_bootstrap.builder.arbitrations import ArbitrationStore
 from scc_brainai_bootstrap.builder.build_authorization import (
     BuildAuthorizationStore, authorization_status, build_authorization_fact, resolve_cost_gate)
@@ -710,6 +710,40 @@ def realize(pursuit_ref: str, *, mode: str = "demo", budget_usd: float = 2.0,
     return vm
 
 
+def resume(pursuit_ref: str) -> Dict[str, Any]:
+    """Ré-attache une Pursuit depuis le disque, sans cognition ni replay de livraison.
+
+    Le dernier dialogue, la continuité Memory-11 et les états d'exécution sont
+    distincts. Ce rappel n'émet ni tour, ni confirmation, ni GO, ni nouveau run.
+    """
+    import re
+    from brainai_app.continuity import ReadOnlyCapability, read_delivery_state
+    from brainai_app.recall import _resolve_pursuit_dir_readonly, retrieve_pursuit
+
+    if not isinstance(pursuit_ref, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', pursuit_ref):
+        return {'status': 'refused', 'reason': 'pursuit_ref_invalide'}
+    root = _resolve_pursuit_dir_readonly(pursuit_ref)
+    if root is None or not root.is_dir() or root.is_symlink():
+        return {'status': 'refused', 'reason': 'session_absente_ou_invalide'}
+    guard = ReadOnlyCapability()
+    brain = BrainAI(Capabilities(understanding=guard, specification=guard, build=guard))
+    outcome = brain.pursue(resume_intent(pursuit_ref), context=_session_context(root, budget_usd=1.0))
+    if outcome.continuity is None:
+        return {'status': 'refused', 'reason': outcome.refused}
+    try:
+        delivery = read_delivery_state(root, pursuit_ref)
+        memory = retrieve_pursuit(pursuit_ref, strict=True)
+    except Exception:
+        # Inclut les erreurs typées du composant Memory-11 chargé dynamiquement.
+        # Ne pas exposer des chemins/configs/secrets via un message d'exception brut.
+        return {'status': 'refused', 'reason': 'preuves_de_continuite_illisibles_ou_incoherentes'}
+    return {'status': 'resumed', 'pursuit_ref': pursuit_ref, 'execution_authorized': False,
+            'dialogue': {'state': outcome.state, 'wait_reason': outcome.wait_reason,
+                         'reply': outcome.reply, 'proposal': outcome.proposal,
+                         'refused': outcome.refused, 'continuity': outcome.continuity},
+            'memory': memory, 'delivery': delivery}
+
+
 def propose_delivery_correction(pursuit_ref: str, *, parent_run_ref: str,
                                 test_result_ref: str, suggestion: str) -> Dict[str, Any]:
     """Prépare une proposition inerte depuis les preuves d'une session existante.
@@ -917,5 +951,5 @@ def consult(capability: str, *, decision_source: str = "explicit_request", mode:
 
 
 __all__ = ["demo_capabilities", "real_capabilities", "to_viewmodel", "run_pursuit", "converse", "realize",
-           "authorize", "consult", "propose_delivery_correction", "authorize_delivery_correction",
+           "authorize", "consult", "resume", "propose_delivery_correction", "authorize_delivery_correction",
            "execute_delivery_correction"]

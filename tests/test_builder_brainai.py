@@ -354,11 +354,11 @@ def test_pursue_refuses_non_runcontext():
 
 
 # ===================================================================== #
-# pursue — resume reste au seuil (non encore orchestré) ; converse/realize : voir section CONVERSATION T2
+# pursue — resume exige les preuves persistées, sans aucun appel de capacité
 # ===================================================================== #
-def test_pursue_valid_resume_is_accepted_and_reaches_seam():
+def test_pursue_resume_requires_turn_store_before_any_call():
     caps = _caps(); brain = BrainAI(caps)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(GovernanceError, match='stores.turns'):
         brain.pursue(resume_intent("pursuit_abc"), context=_ctx())
     assert _all_calls(caps) == 0
 

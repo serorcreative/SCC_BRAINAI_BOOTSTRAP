@@ -334,6 +334,8 @@ class Outcome:
     # ``proposal`` : enveloppe typée (capability/provider/ok/status/result/tool_ref/as_of/provenance/error/
     # decision_source/pursuit_ref). Disponible programmatiquement pour une exploitation cognitive ultérieure.
     invocation: Optional[Dict[str, Any]] = None
+    # Reprise en lecture : contexte historique explicite, jamais un nouvel acte cognitif.
+    continuity: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.state not in PURSUIT_STATES:
@@ -663,6 +665,8 @@ class BrainAI:
           jamais l'arc de lui-même.**
         * ``realize`` — sur **confirmation humaine** : relit le dernier ``matured_need`` mûri de **cette même**
           Pursuit (jamais reçu de l'UI) et lance l'arc **sur la même identité** (aucun nouveau ``pursuit_id``).
+        * ``resume`` — relit strictement le dialogue de cette identité, sans appel de capacité ni écriture.
+          Restitue le dernier état conversationnel et ses références ; aucune action implicite.
 
         Dans tous les cas : **arrêt au premier échec/refus** (aucun retry), budget total transporté (aucun appel
         si insuffisant), coût **agrégé honnêtement**, **rien rendu officiel** (succès d'arc ⇒ ``governance``)."""
@@ -677,8 +681,56 @@ class BrainAI:
             return self._realize(intent, context)
         if intent.kind == "consult":
             return self._consult(intent, context)
-        raise NotImplementedError(
-            "intention 'resume' (reprise d'une Pursuit suspendue) pas encore orchestrée")
+        if intent.kind == "resume":
+            return self._resume(intent, context)
+
+    def _resume(self, intent: Intent, context: RunContext) -> Outcome:
+        """Ré-attache le dialogue persisté, sans replay, outil, écriture ou permission.
+
+        L'état projeté est celui du dernier tour, pas celui d'une livraison.
+        Les runs et Memory-11 sont raccordés séparément par l'application.
+        Une matière nouvelle doit passer par converse/realize, jamais être
+        interprétée comme un GO par ce parcours de lecture.
+        """
+        base = dict(project_id=context.project_id, pursuit_id=intent.pursuit_ref,
+                    as_of=self._clock(), cost_total={'value': 0.0, 'kind': 'real'})
+        if intent.payload:
+            return Outcome(state='terminal', refused='resume est une lecture ; payload actif refusé', **base)
+        store = self._require_turns(context.stores)
+        try:
+            all_turns = store.read_all(strict=True)
+            turns = [t for t in all_turns if t.get('pursuit_ref') == intent.pursuit_ref]
+            if not turns:
+                return Outcome(state='terminal', refused='aucun tour persisté pour cette Pursuit', **base)
+            ids = [t.get('turn_id') for t in turns]
+            if (any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids)
+                    or any(t.get('fact_type') != 'turn' or t.get('status') not in ('proposed', 'failed')
+                           for t in turns)):
+                raise ValueError('tours incohérents')
+            history = []
+            for t in turns:
+                if t['status'] == 'proposed':
+                    if (not isinstance(t.get('message'), str) or not isinstance(t.get('reply'), str)
+                            or t.get('readiness') not in ('continue', 'ready')
+                            or (t['readiness'] == 'ready' and not matured_need_present(t.get('matured_need')))):
+                        raise ValueError('tour incomplet')
+                    history.extend([{'role': 'user', 'content': t['message']},
+                                    {'role': 'assistant', 'content': t['reply']}])
+        except (OSError, ValueError):
+            return Outcome(state='terminal', refused='journal de tours illisible ou incohérent', **base)
+        last = turns[-1]
+        continuity = dict(turn_refs=ids, last_turn_ref=last['turn_id'], last_turn_status=last['status'],
+                          last_turn_as_of=last.get('as_of'), history=history,
+                          execution_authorized=False, cost_scope='resume_read_only')
+        if last['status'] == 'failed':
+            return Outcome(state='terminal', refused=_REALIZE_REFUSED_FAILED, continuity=continuity, **base)
+        ready = last['readiness'] == 'ready'
+        proposal = {'readiness': last['readiness']}
+        if ready:
+            proposal['matured_need'] = normalize_matured_need(last['matured_need'])
+        return Outcome(state='awaiting' if ready else 'active',
+                       wait_reason='confirmation' if ready else None, reply=last['reply'],
+                       proposal=proposal, continuity=continuity, **base)
 
     # ----------------------------------------------------------------- #
     # Arc de réalisation — Need/matured_need → Understanding → Specification → Build

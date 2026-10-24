@@ -40,7 +40,17 @@ class TurnStore:
                     continue
         return out
 
-    def read_all(self) -> List[Dict[str, Any]]:
+    def read_all(self, *, strict: bool = False) -> List[Dict[str, Any]]:
+        if strict:
+            if self._path.is_symlink():
+                raise ValueError('journal de tours symlink refusé')
+            if not self._path.exists():
+                return []
+            facts = [json.loads(line) for line in self._path.read_text(encoding='utf-8').splitlines()
+                     if line.strip()]
+            if any(not isinstance(fact, dict) for fact in facts):
+                raise ValueError('journal de tours non objet')
+            return facts
         return self._load_all()
 
     def record(self, fact: Dict[str, Any]) -> Dict[str, Any]:

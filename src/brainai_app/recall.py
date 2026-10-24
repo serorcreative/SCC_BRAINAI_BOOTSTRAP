@@ -70,7 +70,7 @@ def _resumable_arc(pursuit_ref: str) -> bool:
     return any(t.get("pursuit_ref") == pursuit_ref and t.get("status") == "proposed" for t in turns)
 
 
-def retrieve_pursuit(pursuit_ref: str) -> Dict[str, Any]:
+def retrieve_pursuit(pursuit_ref: str, *, strict: bool = False) -> Dict[str, Any]:
     """Retrouve + résume la continuité Memory-11 d'une Pursuit, et indique **indépendamment** si son arc est
     reprenable — sans effectuer la reprise.
 
@@ -83,8 +83,15 @@ def retrieve_pursuit(pursuit_ref: str) -> Dict[str, Any]:
 
     Lecture seule ; remonte fail-closed toute corruption Memory-11 (``MemoryCorruption``)."""
     from brainai_app.composition import _state_root
+    import re
+    if not isinstance(pursuit_ref, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', pursuit_ref):
+        raise ValueError('référence de Pursuit invalide')
     store = open_memory_store(_state_root() / "memory")     # peut lever (fail-closed) : MemoryUnavailable / MemoryCorruption
+    if strict and (getattr(store, 'truncated_tail', False) or getattr(store, 'reconciliation_required', False)):
+        raise ValueError('mémoire nécessitant une réconciliation explicite')
     events = read_pursuit_delivery(store, pursuit_ref)
+    if strict and any((e.get('data') or {}).get('pursuit_ref') != pursuit_ref for e in events):
+        raise ValueError('mémoire rattachée à une autre Pursuit')
     latest = events[-1] if events else None
     resumable = _resumable_arc(pursuit_ref)
     return {
