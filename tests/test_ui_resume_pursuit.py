@@ -1,12 +1,6 @@
-"""Banc **Étage 1** — raccord UI de **reprise d'une pursuit existante** (Option A), déterministe, 0 €, 0 LLM.
-
-Le serveur/moteur supporte déjà la reprise (``converse``/``realize`` transmettent ``pursuit_ref`` ; l'historique
-vit côté serveur et est relu par le moteur). Ce banc verrouille le fait que l'**UI** :
-* expose un contrôle de reprise (``#resume-id`` + ``#resume-btn``) ;
-* ré-attache l'identifiant en assignant ``currentPursuitId`` depuis l'input (aucune fabrication d'historique) ;
-* n'introduit **aucun** appel backend nouveau (les appels réseau restent ``converse``/``realize`` via ``pursuit_ref``).
-
-Test purement **statique** (lecture du HTML/JS livré) — ni serveur ni cognition.
+"""Contrôles statiques de reprise UI : requête authentifiée, rattachement après
+confirmation serveur, aucun appel automatique de réalisation. Les scénarios
+exécutés sont dans test_runtime_interface et test_runtime_browser.
 """
 
 from __future__ import annotations
@@ -35,16 +29,19 @@ def test_resume_reattaches_current_pursuit_id_from_input(html: str):
     assert re.search(r'\$\("resume-id"\)\.value', html)
 
 
-def test_resume_adds_no_new_backend_call(html: str):
-    # aucune nouvelle route/opération : un SEUL primitif réseau (fetch), vers /v1/pursue ; kinds inchangés.
+def test_resume_uses_authenticated_workflow_on_same_endpoint(html: str):
+    # Le nouveau workflow réutilise le même endpoint et le même primitif authentifié.
     assert html.count("fetch(") == 1                                      # un unique point d'appel réseau
     assert 'fetch("/v1/pursue"' in html                                   # toujours le même endpoint
     kinds = set(re.findall(r'kind:\s*"([a-z]+)"', html))
-    assert kinds <= {"converse", "realize"}                               # aucun kind nouveau introduit
+    assert kinds == {"converse", "workflow", "realize"}
+    assert 'kind:"realize", pursuit_ref:currentPursuitId, mode:selectedMode()' in html
+    assert 'action: "resume"' in html
+    assert 'env.data.status !== "resumed"' in html
 
 
 def test_resume_does_not_auto_realize(html: str):
     # la reprise retire toute proposition héritée et n'appelle jamais la réalisation
-    handler = html.split('resume-btn")')[1].split("});")[0]
+    handler = html.split('resume-btn")')[1].split('$("approve-btn")')[0]
     assert "removeRealizeAction()" in handler
-    assert "runRealize" not in handler and "realize" not in handler
+    assert "runRealize" not in handler

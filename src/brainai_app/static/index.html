@@ -9,7 +9,7 @@
   * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0;
          display: grid; grid-template-columns: 1fr 340px; min-height: 100vh; }
-  main { padding: 28px 32px; display: flex; flex-direction: column; }
+  main { padding: 28px 32px; display: flex; flex-direction: column; min-width:0; }
   aside { border-left: 1px solid #8883; padding: 24px 20px; background: #8881; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   p.sub { color: #888; margin: 0 0 20px; }
@@ -36,7 +36,7 @@
   aside h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #888; margin: 18px 0 8px; }
   aside h2:first-child { margin-top: 0; }
   .row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; }
-  .row b { text-align: right; }
+  .row b { text-align: right; overflow-wrap:anywhere; min-width:0; }
   .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #8883; }
   ul { list-style: none; padding: 0; margin: 0; }
   #steps li { font-size: 13px; padding: 4px 0; display: flex; gap: 8px; align-items: center; }
@@ -55,13 +55,23 @@
   @keyframes pop { 0% { transform: scale(.92) translateY(4px); opacity: 0; }
                    60% { transform: scale(1.02); opacity: 1; }
                    100% { transform: scale(1); } }
+  .workflow { border:1px solid #8885; border-radius:12px; padding:16px; margin:14px 0; }
+  .workflow button { padding:9px 14px; margin:5px 4px 5px 0; }
+  pre { white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.5 monospace; max-height:300px; overflow:auto; }
+  .settings { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+  .settings input, .settings select { max-width:230px; padding:6px; }
+  [hidden] { display:none !important; }
+  .controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:-8px 0 16px; }
+  input, select, textarea { min-width:0; max-width:100%; }
+  .msg, .trace, .deliverable, #steps li { overflow-wrap:anywhere; min-width:0; }
+  @media(max-width:800px) { body { grid-template-columns:minmax(0,1fr); } aside { border-left:0; } main { padding:20px; } }
 </style>
 </head>
 <body>
 <main>
   <h1>Bienvenue dans BrainAI</h1>
   <p class="sub">Que souhaitez-vous obtenir ?</p>
-  <div style="display:flex; align-items:center; gap:10px; margin:-8px 0 16px; font-size:14px;">
+  <div class="controls" style="font-size:14px;">
     <label for="mode-select">Mode d'exécution :</label>
     <select id="mode-select"
             style="font:inherit; padding:4px 8px; border-radius:8px; border:1px solid #8886; background:transparent; color:inherit;">
@@ -69,13 +79,45 @@
       <option value="real">Réel — facturable (cognition réelle)</option>
     </select>
   </div>
-  <div style="display:flex; align-items:center; gap:8px; margin:-8px 0 16px; font-size:13px;">
+  <div class="controls" style="font-size:13px;">
     <label for="resume-id" class="muted">Reprendre une pursuit :</label>
     <input id="resume-id" type="text" placeholder="pursuit_… (id existant)"
            style="flex:1; max-width:300px; font:inherit; padding:4px 8px; border-radius:8px; border:1px solid #8886; background:transparent; color:inherit;">
     <button id="resume-btn" type="button" style="padding:4px 12px; background:#6b7280;">Reprendre</button>
   </div>
   <div id="conv"></div>
+  <div class="settings">
+    <label>Budget par préparation / plafond de livraison (USD)
+      <input id="budget" type="number" value="2" min="0.01" step="0.5"></label>
+    <label>Constructeur
+      <select id="builder"><option value="">Fournisseur configuré (peut être facturable)</option>
+      <option value="deterministic_local">Site statique local — sans LLM de construction</option></select></label>
+    <button id="new-btn" type="button">Nouvelle demande</button>
+  </div>
+  <section id="gate-panel" class="workflow" hidden>
+    <h2>Proposition et accord de coût</h2>
+    <p>La préparation peut utiliser une cognition facturable. Approuver enregistre votre accord ;
+       la construction attend un clic séparé. Les coûts inconnus restent inconnus.</p>
+    <pre id="gate-content"></pre>
+    <button id="approve-btn" type="button">Approuver cette proposition</button>
+    <button id="decline-btn" type="button">Refuser</button>
+    <button id="deliver-btn" type="button" disabled>Construire et tester</button>
+  </section>
+  <section id="delivery-panel" class="workflow" hidden>
+    <h2>Livraison et preuves</h2><p id="delivery-status" role="status"></p>
+    <pre id="delivery-content"></pre>
+    <div id="correction-controls" hidden>
+      <label>Correction proposée <textarea id="correction-text" placeholder="Décrivez la correction souhaitée"></textarea></label>
+      <button id="propose-correction-btn" type="button">Consigner la proposition de correction</button>
+    </div>
+    <p id="correction-status"></p>
+    <button id="approve-correction-btn" type="button" hidden>Autoriser une tentative corrective</button>
+    <button id="execute-correction-btn" type="button" hidden>Exécuter la correction et retester</button>
+  </section>
+  <section class="workflow">
+    <button id="learning-btn" type="button">Proposer des apprentissages depuis les livraisons</button>
+    <p id="learning-status" role="status"></p><pre id="learning-content"></pre>
+  </section>
   <form id="f">
     <textarea id="need" placeholder="Ex. : Une application, une étude, un produit, un scénario, une stratégie, un plan technique… Décrivez simplement ce que vous souhaitez obtenir." autofocus></textarea>
     <button id="send" type="submit">Envoyer</button>
@@ -103,11 +145,49 @@
   const TOKEN = new URLSearchParams(location.search).get("t") || "";
   const $ = (id) => document.getElementById(id);
   const conv = $("conv");
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let currentPursuitId = null;   // l'UI ne conserve QUE l'identifiant ; l'historique vit côté serveur.
+  let presentation = null, lastDelivery = null, correctionRef = null, busy = false;
   // Mode d'exécution choisi par l'utilisatrice (démo 0 € par défaut / réel facturable). AUCUNE valeur codée en dur
   // dans les appels : converse ET realize (et tout futur 'need') transmettent CE mode. Le serveur reste seul juge.
   const selectedMode = () => { const el = $("mode-select"); return el ? el.value : "demo"; };
+  const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g,
+    c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+  async function guarded(fn) {
+    if (busy) return;
+    busy = true; document.querySelector("main").inert = true;
+    try { await fn(); } catch (err) { addMsg("Opération interrompue : " + err.message, "brain"); }
+    finally { busy = false; document.querySelector("main").inert = false; }
+  }
+  async function workflow(action, fields = {}) {
+    const body = Object.assign({kind: "workflow", action, mode: selectedMode()}, fields);
+    if (action !== "learning") body.pursuit_ref = currentPursuitId;
+    const {ok, status, env} = await post(body);
+    if (!ok) throw new Error(env.error || status);
+    if (env.data.status === "refused") throw new Error(env.data.reason || "Opération refusée");
+    return env.data;
+  }
+  function clearGate() {
+    presentation = null; $("gate-panel").hidden = true; $("deliver-btn").disabled = true;
+    $("approve-correction-btn").hidden = true; $("execute-correction-btn").hidden = true;
+  }
+  function showGate(p) {
+    presentation = p; $("gate-panel").hidden = false;
+    $("gate-content").textContent = JSON.stringify({specification:p.specification,
+      choix:p.cost_gate.selected_option_id, justification:p.cost_gate.selection_rationale,
+      comparaison:p.cost_gate.comparison, couts_inconnus:p.cost_gate.cost_unknowns,
+      hypotheses:p.cost_gate.material_assumptions, dependances:p.cost_gate.dependencies,
+      plafond_livraison_usd:p.budget_usd, constructeur:p.build_provider || "configuré"}, null, 2);
+    $("deliver-btn").disabled = true;
+  }
+  function showDelivery(report) {
+    lastDelivery = report; $("delivery-panel").hidden = false;
+    $("delivery-status").textContent = report.status === "delivered" ?
+      (report.memory_11_id ? "Livraison vérifiée et mémorisée." : "Livraison vérifiée ; mémorisation non confirmée.") :
+      "Livraison non aboutie : " + report.status + ". Aucun nouvel essai automatique.";
+    $("delivery-content").textContent = JSON.stringify(report, null, 2);
+    $("correction-controls").hidden = !(report.status === "failed" && report.test_result);
+    $("deliver-btn").disabled = true;
+  }
 
   function addMsg(text, who) {
     const d = document.createElement("div");
@@ -120,7 +200,7 @@
 
   function setPanelMeta(p) {
     $("p-id").textContent = p.pursuit_id || "—";
-    $("p-state").innerHTML = '<span class="pill">' + (p.state || "—") + "</span>";
+    $("p-state").textContent = p.state || "—";
     $("p-wait").textContent = p.wait_reason || "—";
     $("p-budget").textContent = (p.budget_usd != null ? p.budget_usd + " USD" : "—");
     $("p-time").textContent = (p.elapsed_ms != null ? p.elapsed_ms + " ms" : "—");
@@ -134,7 +214,7 @@
     $("steps").innerHTML = steps.map((s) =>
       '<li><span class="' + (s.status === "proposed" ? "ok" : s.status === "failed" ? "ko" : "muted") + '">'
       + (s.status === "proposed" ? "✓" : s.status === "failed" ? "✗" : "•") + "</span>"
-      + "<span>" + s.label + "</span> <code>" + (s.fact_id || s.status) + "</code></li>"
+      + "<span>" + esc(s.label) + "</span> <code>" + esc(s.fact_id || s.status) + "</code></li>"
     ).join("") || '<li class="muted">—</li>';
   }
   function appendDeliverable(d) {
@@ -143,7 +223,7 @@
     if (ph) ul.removeChild(ph);                       // retire le placeholder "—"
     const li = document.createElement("li");
     li.className = "deliverable";
-    li.innerHTML = '<span class="tick">✓</span><span>' + d.label + "</span><code>" + d.fact_id + "</code>";
+    li.innerHTML = '<span class="tick">✓</span><span>' + esc(d.label) + "</span><code>" + esc(d.fact_id) + "</code>";
     ul.appendChild(li);
   }
 
@@ -161,14 +241,15 @@
       },
       stepStart(step) {
         pending = document.createElement("div"); pending.className = "line pending";
-        pending.innerHTML = '<span>•</span><span>' + step.progress_label + '<span class="dots"></span></span>';
+        pending.innerHTML = '<span>•</span><span>' + esc(step.progress_label) + '<span class="dots"></span></span>';
         trace.appendChild(pending); conv.scrollTop = conv.scrollHeight;
       },
       stepDone(step) {
-        const ok = step.status === "proposed";
+        const ok = ["proposed", "reused", "approved"].includes(step.status);
+        const failed = ["failed", "refused"].includes(step.status);
         pending.className = "line";
-        pending.innerHTML = '<span class="' + (ok ? "ok" : "ko") + '">' + (ok ? "✓" : "✗") + "</span>"
-          + "<span>" + step.label + (ok ? " terminé" : " — échec") + "</span>";
+        pending.innerHTML = '<span class="' + (ok ? "ok" : failed ? "ko" : "muted") + '">' + (ok ? "✓" : failed ? "✗" : "•") + "</span>"
+          + "<span>" + esc(step.label) + (ok ? " terminé" : " — " + esc(step.status)) + "</span>";
         doneSteps.push(step); renderStepsPanel(doneSteps);
         if (ok) appendDeliverable({ label: step.label, fact_id: step.fact_id });
         conv.scrollTop = conv.scrollHeight;
@@ -184,10 +265,7 @@
     yield { type: "begin", pursuit: vm.pursuit };
     for (const step of vm.steps) {
       yield { type: "step:start", step };
-      await sleep(650);
       yield { type: "step:done", step };
-      if (step.status !== "proposed") { yield { type: "finish", pursuit: vm.pursuit, reply: vm.conversation.reply }; return; }
-      await sleep(300);
     }
     yield { type: "finish", pursuit: vm.pursuit, reply: vm.conversation.reply };
   }
@@ -228,7 +306,7 @@
     wrap.className = "msg brain realize-wrap"; wrap.id = "realize-wrap";
     const b = document.createElement("button");
     b.id = "realize-btn"; b.type = "button"; b.className = "realize-btn";
-    b.textContent = "Lancer la réalisation";
+    b.textContent = "Préparer la proposition (cognition facturable en mode réel)";
     b.addEventListener("click", runRealize);
     wrap.appendChild(b); conv.appendChild(wrap); conv.scrollTop = conv.scrollHeight;
   }
@@ -236,25 +314,31 @@
 
   // Clic HUMAIN = confirmation. La MÊME Pursuit poursuit vers l'arc, rejoué par la source progressive existante.
   async function runRealize() {
-    const btn = $("realize-btn"); if (btn) btn.disabled = true;
-    const view = makeView();
-    try {
-      const { ok, status, env } = await post({ kind: "realize", pursuit_ref: currentPursuitId, mode: selectedMode() });
-      if (!ok) { view.error("Erreur : " + (env.error || status)); return; }
+    await guarded(async () => {
+      clearGate();
+      if (selectedMode() === "demo") {
+        const {ok, env} = await post({kind:"realize", pursuit_ref:currentPursuitId, mode:selectedMode()});
+        if (!ok) throw new Error(env.error || "Démonstration indisponible");
+        removeRealizeAction();
+        await drive(replaySource(env.data), makeView());
+        return;
+      }
+      const vm = await workflow("prepare", {budget_usd:Number($("budget").value), build_provider:$("builder").value || null});
       removeRealizeAction();
-      await drive(replaySource(env.data), view);   // Understanding → Specification → Build, animé
-    } catch (err) {
-      view.error("Erreur réseau : " + err);
-    }
+      await drive(replaySource(vm), makeView());
+      if (vm.workflow && vm.workflow.status === "prepared") showGate(vm.workflow);
+    });
   }
 
   $("f").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (busy) return;
     const message = $("need").value.trim();
     if (!message) return;
     addMsg(message, "user");
     $("need").value = "";
     $("send").disabled = true;
+    busy = true; document.querySelector("main").inert = true; clearGate();
     removeRealizeAction();                          // un nouveau message remplace une proposition en attente
     try {
       const { ok, status, env } = await post({ kind: "converse", message, pursuit_ref: currentPursuitId, mode: selectedMode() });
@@ -264,20 +348,67 @@
       addMsg("Erreur réseau : " + err, "brain");
     } finally {
       $("send").disabled = false;
+      busy = false; document.querySelector("main").inert = false;
     }
   });
 
-  // Reprise d'une pursuit EXISTANTE : l'UI ne fait que RÉ-ATTACHER l'identifiant ; l'historique vit côté serveur
-  // et sera relu par le moteur au prochain tour. AUCUN backend nouveau : converse/realize transmettent déjà
-  // ``pursuit_ref``. Ne fabrique aucun historique, ne rejoue rien, n'autorise aucune réalisation.
-  $("resume-btn").addEventListener("click", () => {
+  $("resume-btn").addEventListener("click", () => guarded(async () => {
     const id = $("resume-id").value.trim();
     if (!id) return;
-    currentPursuitId = id;                          // ré-attache l'identité ; les tours suivants la portent
-    removeRealizeAction();                          // pas de proposition héritée d'une autre pursuit
-    $("p-id").textContent = id;
-    addMsg("Reprise de la pursuit " + id + " — l'historique est relu côté BrainAI au prochain message. "
-      + "Poursuivez la conversation ; la réalisation reste soumise à votre confirmation explicite.", "brain");
+    const {ok, env} = await post({kind: "workflow", action: "resume", pursuit_ref:id, mode:selectedMode()});
+    if (!ok || env.data.status !== "resumed") throw new Error(env.error || env.data.reason);
+    currentPursuitId = id; correctionRef = null; lastDelivery = null; clearGate();
+    removeRealizeAction(); conv.replaceChildren(); $("delivery-panel").hidden = true;
+    const r = env.data;
+    for (const h of r.dialogue.continuity.history) addMsg(h.content, h.role === "user" ? "user" : "brain");
+    setPanelMeta({pursuit_id:id, state:r.dialogue.state, wait_reason:r.dialogue.wait_reason});
+    addMsg("Contexte relu. Aucun travail relancé. Mémoire : " + (r.memory.found ? "livraison historique retrouvée" : "aucune livraison") +
+      ". États des runs : " + r.delivery.runs.map(x => x.status).join(", "), "brain");
+    if (r.interface_requires_reconciliation) addMsg("Tentative interrompue ou résultat non confirmé : réconciliation nécessaire, aucun rejeu autorisé.", "brain");
+    const reports = r.interface_history.filter(x => x.kind === "delivery_report" && x.report && x.report.test_result);
+    if (reports.length) showDelivery(reports[reports.length - 1].report);
+    if (r.dialogue.wait_reason === "confirmation") showRealizeAction();
+  }));
+  $("approve-btn").addEventListener("click", () => guarded(async () => {
+    await workflow("authorize", {presentation_ref:presentation.presentation_ref, decision:"approved"});
+    addMsg("Accord de coût enregistré. La construction attend votre clic.", "brain");
+    $("deliver-btn").disabled = !!lastDelivery;
+    $("approve-correction-btn").hidden = !correctionRef;
+  }));
+  $("decline-btn").addEventListener("click", () => guarded(async () => {
+    await workflow("authorize", {presentation_ref:presentation.presentation_ref, decision:"declined"});
+    clearGate(); addMsg("Proposition refusée. Aucune construction lancée.", "brain");
+  }));
+  $("deliver-btn").addEventListener("click", () => guarded(async () => {
+    $("deliver-btn").disabled = true;
+    showDelivery(await workflow("deliver", {presentation_ref:presentation.presentation_ref}));
+  }));
+  $("propose-correction-btn").addEventListener("click", () => guarded(async () => {
+    const r = await workflow("propose_correction", {parent_run_ref:lastDelivery.provenance.run_id,
+      test_result_ref:lastDelivery.test_result.test_result_id, suggestion:$("correction-text").value});
+    correctionRef = r.correction.correction_id;
+    $("correction-status").textContent = "Correction consignée. Précisez le besoin corrigé dans le dialogue, préparez une nouvelle proposition et approuvez son coût.";
+  }));
+  $("approve-correction-btn").addEventListener("click", () => guarded(async () => {
+    await workflow("authorize_correction", {presentation_ref:presentation.presentation_ref, correction_ref:correctionRef, decision:"approved"});
+    $("execute-correction-btn").hidden = false;
+    $("correction-status").textContent = "Une tentative corrective autorisée ; exécution sur clic séparé.";
+  }));
+  $("execute-correction-btn").addEventListener("click", () => guarded(async () => {
+    $("execute-correction-btn").hidden = true;
+    showDelivery(await workflow("execute_correction", {presentation_ref:presentation.presentation_ref, correction_ref:correctionRef}));
+  }));
+  $("learning-btn").addEventListener("click", () => guarded(async () => {
+    const r = await workflow("learning");
+    $("learning-status").textContent = r.status === "proposed" ? "Propositions à examiner — aucune application automatique." : "Pas assez de livraisons vérifiées pour établir une récurrence.";
+    $("learning-content").textContent = JSON.stringify({recommandations:r.recommendations, preuves:r.memory_ids, exclusions:r.excluded}, null, 2);
+  }));
+  $("new-btn").addEventListener("click", () => {
+    if (busy) return;
+    currentPursuitId = null; correctionRef = null; lastDelivery = null; clearGate(); removeRealizeAction();
+    conv.replaceChildren(); $("delivery-panel").hidden = true; setPanelMeta({});
+    $("steps").replaceChildren(); $("deliverables").replaceChildren();
+    $("correction-status").textContent = ""; $("correction-text").value = "";
   });
 </script>
 </body>

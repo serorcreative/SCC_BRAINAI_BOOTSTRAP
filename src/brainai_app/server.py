@@ -88,13 +88,22 @@ class _Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, json.JSONDecodeError):
             self._send_json(400, {"error": "corps JSON invalide"}); return
+        if not isinstance(payload, dict):
+            self._send_json(400, {"error": "objet JSON requis"}); return
         if operation == "pursue":
             mode = payload.get("mode") or "demo"
             if mode not in ("demo", "real"):
                 self._send_json(400, {"error": "mode invalide (demo|real)"}); return
             # Un seul endpoint, plusieurs genres d'intention. 'need' (défaut) préserve le contrat historique.
             kind = payload.get("kind") or "need"
-            if kind == "need":
+            if kind == "workflow":
+                from brainai_app.workflow import dispatch, validate
+                try:
+                    validate(payload)
+                except ValueError:
+                    self._send_json(400, {"error": "requête workflow invalide"}); return
+                data = dispatch(payload)
+            elif kind == "need":
                 need = str(payload.get("need") or "").strip()
                 if not need:
                     self._send_json(400, {"error": "champ 'need' requis (non vide)"}); return
