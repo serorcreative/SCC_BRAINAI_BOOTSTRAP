@@ -80,6 +80,15 @@ fichiers Python concernés et `git diff --check` : OK.
 Les 17 premiers cas dédiés avaient été exécutés rouges avant implémentation.
 Aucun audit indépendant réalisé pour ce lot.
 
+Correctif de portabilité du banc après ouverture de la PR #30 : le premier
+run CI échouait uniquement dans le test de processus neuf (`ModuleNotFoundError:
+brainai_app`). Le `pythonpath` de pytest ne s'hérite pas dans un sous-processus.
+L'échec a été reproduit localement sans `PYTHONPATH` ; le test transmet désormais
+explicitement le chemin absolu `src` au processus enfant et retire la dépendance
+à l'environnement du shell. Aucun changement du code produit dans ce correctif.
+Revalidation : `env -u PYTHONPATH .venv/bin/python -m pytest -q -o addopts='' tests/`
+— **1095 passed, 4 skipped en 41,82 s**.
+
 ## Limites et continuation
 
 - Surface Python explicite. Le raccord du bouton UI et la recette complète

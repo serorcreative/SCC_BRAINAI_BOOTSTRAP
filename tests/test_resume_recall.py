@@ -145,13 +145,20 @@ def test_core_resume_rejects_action_payload_without_calls(session):
 
 
 def test_real_process_restart_and_subsequent_conversation_preserve_identity(session, monkeypatch):
+    import os
     import subprocess
     import sys
+    from pathlib import Path
     p = session
     # Processus neuf : aucun cache de session ou import Memory-11 du parent.
     code = "from brainai_app.composition import resume; import json; print(json.dumps(resume('pursuit_resume')))"
     before = tree(C._state_root())
-    child = json.loads(subprocess.check_output([sys.executable, '-c', code], text=True, timeout=15))
+    # pytest ajoute src à son propre sys.path, pas à celui d'un nouveau Python.
+    # Le processus enfant reçoit explicitement le code testé, sans dépendre du shell.
+    monkeypatch.delenv('PYTHONPATH', raising=False)
+    child_env = dict(os.environ, PYTHONPATH=str(Path(C.__file__).resolve().parents[1]))
+    child = json.loads(subprocess.check_output([sys.executable, '-c', code],
+                                               env=child_env, text=True, timeout=15))
     assert child['status'] == 'resumed' and child['pursuit_ref'] == p.ref
     assert tree(C._state_root()) == before
     caps = C.demo_capabilities()
